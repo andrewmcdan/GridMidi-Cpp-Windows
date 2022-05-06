@@ -692,7 +692,192 @@ void gridMidiInCB(double deltatime, std::vector< unsigned char >* message, void*
         }
     }
 
+    /*
+    if(gridState.gridMode == "normal"){
+        if ((int)message->at(0) == 144 && (int)message->at(2) == 127) { // grid button
+            gridButtonDownTime[gridX + (8 * gridY)] = dateNowMillis();
+            gridState.patterns[gridState.currentSelectedPattern].toggleButton(gridX, gridY);
+            copyCurrentPatternGridEnabledToGridColor();
+            gridButtonsPressed.push(message[1]);
+            std::
+            lastPressedGridButton[0] = gridX;
+            lastPressedGridButton[1] = gridY;
+        }
+        if (message[0] == 144 && message[2] == 0) {
+            gridButtonUpTime[gridX + (8 * gridY)] = Date.now();
+            let pressedArrayIndex = gridButtonsPressed.findIndex(el = > el == message[1]);
+            let numberOfPressedButtons = 10 - gridButtonsPressed.findIndex(el = > el > 0);
+            gridButtonsPressed.splice(pressedArrayIndex, 1);
+            gridButtonsPressed.unshift(0);
+            console.log({ numberOfPressedButtons })
+                // checking that this button release corresponds to a single button being pressed.
+                if (numberOfPressedButtons == 1) {
+                    // check time this button was pressed
+                    let timePressed = gridButtonUpTime[gridX + (8 * gridY)] - gridButtonDownTime[gridX + (8 * gridY)];
+                    // console.log({timePressed});
+                    //check for long press
+                    if (timePressed > 1000) {
+                        //enter gridNote options mode
+                        gridState.gridMode = "gridNoteOpts";
+                        clearGrid();
+                        drawGridNoteOpts();
+                        tempVelocity = gridState.patterns[gridState.currentSelectedPattern].getVelocity(gridX, gridY);
+                        tempNote = gridState.patterns[gridState.currentSelectedPattern].getNote(gridX, gridY);
+                        if (!gridState.patterns[gridState.currentSelectedPattern].getNoteEnabled(gridX, gridY)) {
+                            gridState.patterns[gridState.currentSelectedPattern].toggleButton(gridX, gridY);
+                        }
+                    }
+                }
+        }
+        break;
+    }
+    case "patternOpts1": {
+        if (message[0] == 144 && message[2] == 127) {
+            let numSteps = (gridY * 8) + gridX + 1;
+            gridState.patterns[gridState.currentSelectedPattern].xSize = numSteps;
+            gridState.gridMode = "patternOpts2";
+            sendScrollTextToLaunchPad("Y steps", 15);
+        }
+        break;
+    }
+    case "patternOpts2": {
+        if (message[0] == 144 && message[2] == 127) {
+            let numSteps = (gridY * 8) + gridX + 1;
+            gridState.patterns[gridState.currentSelectedPattern].ySize = numSteps;
+            gridState.gridMode = "patternOpts3";
+            sendScrollTextToLaunchPad("X step size", 15);
+        }
+        break;
+    }
+    case "patternOpts3": {
+        if (message[0] == 144 && message[2] == 127) {
+            gridState.patterns[gridState.currentSelectedPattern].stepSizeX = ((gridY * 8) + gridX + 1);
+            gridState.gridMode = "patternOpts4";
+            sendScrollTextToLaunchPad("Y step size", 15);
+        }
+        break;
+    }
+    case "patternOpts4": {
+        if (message[0] == 144 && message[2] == 127) {
+            gridState.patterns[gridState.currentSelectedPattern].stepSizeY = ((gridY * 8) + gridX + 1);
+            gridState.gridMode = "normal";
+            copyCurrentPatternGridEnabledToGridColor();
+            // sendScrollTextToLaunchPad("Y step size", 15);
+        }
+        break;
+    }
+    case "patternOpts5": {
+        break;
+    }
+    case "patternOpts6": {
+        break;
+    }
+    case "patternOpts7": {
+        break;
+    }
+    case "patternOpts8": {
+        copyCurrentPatternGridEnabledToGridColor();
+        break;
+    }
+    case "gridNoteOpts": {
+        // each button in this mode will set a temporary value that gets set when the confirm / ok button is pressed. 
+        // for the buttons that set velocity, change the velocity settings for the slected note when the button is pressed.
+        if (gridY == 4) {
+            tempVelocity = (gridX * 8) + 7;
+        }
+        else if (gridY == 5) {
+            tempVelocity = ((gridX + 8) * 8) + 7;
+        }
+        else if (gridY == 7) {
+            if (gridX == 0) {
+                gridState.gridMode = "normal";
+                clearGrid();
+                copyCurrentPatternGridEnabledToGridColor();
+            }
+            else if (gridX == 7) {
+                gridState.gridMode = "normal";
+                gridState.patterns[gridState.currentSelectedPattern].setVelocity(lastPressedGridButton[0], lastPressedGridButton[1], tempVelocity);
+                gridState.patterns[gridState.currentSelectedPattern].setNote(lastPressedGridButton[0], lastPressedGridButton[1], tempNote);
+                gridState.patterns[gridState.currentSelectedPattern].setNoteLength(lastPressedGridButton[0], lastPressedGridButton[1], calculateNoteLength(tempnoteLength, gridState.bpm));
+                clearGrid();
+                copyCurrentPatternGridEnabledToGridColor();
+            }
+        }
+        // console.log({tempVelocity})
 
+        if (message[0] == 144 && message[2] == 127) {
+            // note-on message
+            // check for note buttons on grid
+            if (gridY == 1) {
+                let naturalNoteOffsets = [0, 2, 4, 5, 7, 9, 11, 12];
+                tempNote = naturalNoteOffsets[gridX] + (tempOctave * 12);
+                // console.log({tempNote})
+                playNote(gridState.patterns[gridState.currentSelectedPattern].getOutPort().portIndex, gridState.patterns[gridState.currentSelectedPattern].getOutPort().channel, tempNote, tempVelocity, gridState.patterns[gridState.currentSelectedPattern].getNoteLength(lastPressedGridButton[0], lastPressedGridButton[1]));
+            }
+            else if (gridY == 2) {
+                let sharpFlatNoteOffsets = [0, 1, 3, 3, 6, 8, 10, 12];
+                tempNote = sharpFlatNoteOffsets[gridX] + (tempOctave * 12);
+                playNote(gridState.patterns[gridState.currentSelectedPattern].getOutPort().portIndex, gridState.patterns[gridState.currentSelectedPattern].getOutPort().channel, tempNote, tempVelocity, gridState.patterns[gridState.currentSelectedPattern].getNoteLength(lastPressedGridButton[0], lastPressedGridButton[1]));
+                // console.log({tempNote})
+            }
+            else if (gridY == 0) {
+                tempOctave = gridX + 1;
+            }
+            else if (gridY == 6) {
+                // tempnoteLength = gridX + 1;
+                gridButtonDownTime[gridX + (8 * gridY)] = Date.now();
+                gridButtonsPressed.push(message[1]);
+                gridButtonsPressed.shift();
+            }
+
+        }
+        else if (message[0] == 144 && message[2] == 0) {
+            if (gridY == 1) {
+                // @todo play note
+                let naturalNoteOffsets = [0, 2, 4, 5, 7, 9, 11, 12];
+                tempNote = naturalNoteOffsets[gridX] + (tempOctave * 12);
+                // console.log({tempNote})
+                playNote(gridState.patterns[gridState.currentSelectedPattern].getOutPort().portIndex, gridState.patterns[gridState.currentSelectedPattern].getOutPort().channel, tempNote, 0);
+            }
+            else if (gridY == 2) {
+                let sharpFlatNoteOffsets = [0, 1, 3, 3, 6, 8, 10, 12];
+                tempNote = sharpFlatNoteOffsets[gridX] + (tempOctave * 12);
+                playNote(gridState.patterns[gridState.currentSelectedPattern].getOutPort().portIndex, gridState.patterns[gridState.currentSelectedPattern].getOutPort().channel, tempNote, 0);
+                // console.log({tempNote})
+            }
+            else if (gridY == 6) {
+                // tempnoteLength = gridX + 1;
+                gridButtonUpTime[gridX + (8 * gridY)] = Date.now();
+                let pressedArrayIndex = gridButtonsPressed.findIndex(el = > el == message[1]);
+                let numberOfPressedButtons = 10 - gridButtonsPressed.findIndex(el = > el > 0);
+                gridButtonsPressed.splice(pressedArrayIndex, 1);
+                gridButtonsPressed.unshift(0);
+                // console.log({numberOfPressedButtons})
+                // checking that this button release corresponds to a single button being pressed.
+                if (numberOfPressedButtons == 1) {
+                    // check time this button was pressed
+                    let timePressed = gridButtonUpTime[gridX + (8 * gridY)] - gridButtonDownTime[gridX + (8 * gridY)];
+                    // console.log({timePressed});
+                    //check for long press
+                    if (timePressed > 1000) {
+                        //enter gridNote options mode
+                        // gridState.gridMode = "gridNoteOpts";
+                        // clearGrid();
+                        // drawGridNoteOpts();
+                        // tempVelocity = gridState.patterns[gridState.currentSelectedPattern].getVelocity(gridX, gridY);
+                        // tempNote = gridState.patterns[gridState.currentSelectedPattern].getNote(gridX, gridY);
+                        console.log("break")
+                            tempnoteLength[0] = gridX;
+                    }
+                    else {
+                        tempnoteLength[1] = gridX;
+                    }
+                }
+            }
+        }
+        break;
+    }*/
+    
 
 
 
