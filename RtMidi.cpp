@@ -2644,7 +2644,7 @@ static void CALLBACK midiInputCallback( HMIDIIN /*hmin*/,
   else {
     // As long as we haven't reached our queue size limit, push the message.
     if ( !data->queue.push( apiData->message ) )
-      std::cerr << "\nMidiInWinMM: message queue limit reached!!\n\n";
+      std::cerr << "\nMidiInWinMM: message queue limit reached!!\n";
   }
 
   // Clear the vector for the next input message.
