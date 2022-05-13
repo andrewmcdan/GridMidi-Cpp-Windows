@@ -1,16 +1,7 @@
 // cspell:disable
-//*****************************************//
-//  cmidiin.cpp
-//  by Gary Scavone, 2003-2004.
-//
-//  Simple program to test MIDI input and
-//  use of a user callback function.
-//
-//*****************************************//
 
 #include <functional>
 #include <windows.h>
-//#include <stdlib.h>
 #include <string.h>
 #include <tchar.h>
 #include <iostream>
@@ -23,6 +14,16 @@
 #include <algorithm>
 #include <future>
 #include "RtMidi.h"
+#include <stdio.h> 
+#include <tchar.h>
+#include <strsafe.h>
+
+#define BUFSIZE 512
+
+const int DEFAULT_xSize = 12;
+const int DEFAULT_ySize = 8;
+const int DEFAULT_maxXsize = 64;
+const int DEFAULT_maxYsize = 64;
 
 // these constants get OR'ed with the channel when creating MIDI messages.
 const unsigned char noteOnMessage = 0b10010000;
@@ -38,8 +39,8 @@ void playNoteGlobal(int portI, int chan, int note, int vel, int len);
 
 // settings struct for globally used settings values.
 const struct {
-    int maxXsize = 64;
-    int maxYsize = 64;
+    int maxXsize = DEFAULT_maxXsize;
+    int maxYsize = DEFAULT_maxYsize;
     bool welcomeMessageEnabled = false;
 } settings;
 
@@ -85,7 +86,7 @@ public:
         outputPort.channel = 0;
         color.r = 127;
         color.g = 0;
-        color.b = 0;
+        color.b = 127;
         for (int i = 0; i < settings.maxXsize; i++) {
             grid.push_back(std::vector<gridElement_t>());
             for (int u = 0; u < settings.maxYsize; u++) {
@@ -93,7 +94,7 @@ public:
                 grid[i][u].enabled = 0;
                 grid[i][u].note = 60;
                 grid[i][u].velocity = 100;
-                grid[i][u].noteLength = 250;
+                grid[i][u].noteLength = 500;
                 grid[i][u].playing = false;
             }
         }
@@ -307,15 +308,15 @@ public:
     std::function<void()>playButtonOn;
     std::function<void()>playButtonOff;
     std::function<void()>flashPlayButton;
-    int currentXstep = 64;
-    int currentYstep = 8;
+    int xSize = DEFAULT_xSize;
+    int ySize = DEFAULT_ySize;
+    int currentXstep = xSize;
+    int currentYstep = ySize;
     bool playing = false;
 private:
     std::vector<std::vector<gridElement_t>>grid;
     std::future<void>playNoteResetFuturesArray[1024];
     int playNoteFuturesArrayIndex = 0;
-    int xSize = 64;
-    int ySize = 8;
     int xViewIndex = 0;
     int yViewIndex = 0;
     uint32_t tickCount = 0;
@@ -381,7 +382,7 @@ struct gS_t {
     std::vector<color_t> otherColor;
     std::vector<std::vector<color_t>> gridColor;
     color_t logoColor;
-    int bpm = 120;
+    int bpm = 110;
     std::string gridMode = "normal";
     int currentSelectedPattern = 0;
     int numberOfPlayingPatterns = 0;
@@ -397,7 +398,12 @@ time_t dateNowMillis();
 time_t dateNowMicros();
 time_t sendColors(time_t lastSentTime, RtMidiOut* rtmidiout, bool overrideThrottle);
 void copyCurrentPatternGridEnabledToGridColor();
-void clearGrid(gS_t& gridState);
+void clearGrid();
+int calculateNoteLength(int noteLengthIndex_x, int noteLengthIndex_y, int bpm);
+void drawGridNoteOpts();
+DWORD WINAPI helperThreadFn(LPVOID lpvParam);
+DWORD WINAPI InstanceThread(LPVOID);
+VOID GetAnswerToRequest(LPTSTR, LPTSTR, LPDWORD);
 
 gS_t gridState;
 
@@ -420,7 +426,27 @@ time_t playingNotesExpireTimes[1024];
 int currentPlayingNotesIndex = 0;
 
 int main(int argc, char *argv[])
-{    
+{
+    HANDLE helperThread = NULL;
+    DWORD  dwThreadId = 0;
+    printf("Creating a helper thread.\n");
+
+    // Create a thread for this client. 
+    helperThread = CreateThread(
+        NULL,              // no security attribute 
+        0,                 // default stack size 
+        helperThreadFn,    // thread proc
+        NULL,    // thread parameter 
+        0,                 // not suspended 
+        &dwThreadId);      // returns thread ID 
+
+    if (helperThread == NULL)
+    {
+        _tprintf(TEXT("CreateThread failed, GLE=%d.\n"), GetLastError());
+    }
+    //else CloseHandle(helperThread);
+
+
     for (int i = 0; i < 128; i++) {
         midiOutputDevicesEnabled[i] = false;
         midiOutputDevicesClockEn[i] = false;
@@ -582,9 +608,211 @@ int main(int argc, char *argv[])
 }
 
 
+DWORD WINAPI helperThreadFn(LPVOID lpvParam) {
+    printf("from helper thread\n");
+    BOOL   fConnected = FALSE;
+    DWORD  dwThreadId = 0;
+    HANDLE hPipe = INVALID_HANDLE_VALUE, hThread = NULL;
+    LPCTSTR lpszPipename = TEXT("\\\\.\\pipe\\mynamedpipe");
+
+    // The main loop creates an instance of the named pipe and 
+    // then waits for a client to connect to it. When the client 
+    // connects, a thread is created to handle communications 
+    // with that client, and this loop is free to wait for the
+    // next client connect request. It is an infinite loop.
+
+    for (;;)
+    {
+        _tprintf(TEXT("\nPipe Server: Main thread awaiting client connection on %s\n"), lpszPipename);
+        hPipe = CreateNamedPipe(
+            lpszPipename,             // pipe name 
+            PIPE_ACCESS_DUPLEX,       // read/write access 
+            PIPE_TYPE_MESSAGE |       // message type pipe 
+            PIPE_READMODE_MESSAGE |   // message-read mode 
+            PIPE_WAIT,                // blocking mode 
+            PIPE_UNLIMITED_INSTANCES, // max. instances  
+            BUFSIZE,                  // output buffer size 
+            BUFSIZE,                  // input buffer size 
+            0,                        // client time-out 
+            NULL);                    // default security attribute 
+
+        if (hPipe == INVALID_HANDLE_VALUE)
+        {
+            _tprintf(TEXT("CreateNamedPipe failed, GLE=%d.\n"), GetLastError());
+            return -1;
+        }
+
+        // Wait for the client to connect; if it succeeds, 
+        // the function returns a nonzero value. If the function
+        // returns zero, GetLastError returns ERROR_PIPE_CONNECTED. 
+
+        fConnected = ConnectNamedPipe(hPipe, NULL) ?
+            TRUE : (GetLastError() == ERROR_PIPE_CONNECTED);
+
+        if (fConnected)
+        {
+            printf("Client connected, creating a processing thread.\n");
+
+            // Create a thread for this client. 
+            hThread = CreateThread(
+                NULL,              // no security attribute 
+                0,                 // default stack size 
+                InstanceThread,    // thread proc
+                (LPVOID)hPipe,    // thread parameter 
+                0,                 // not suspended 
+                &dwThreadId);      // returns thread ID 
+
+            if (hThread == NULL)
+            {
+                _tprintf(TEXT("CreateThread failed, GLE=%d.\n"), GetLastError());
+                return -1;
+            }
+            else CloseHandle(hThread);
+        }
+        else
+            // The client could not connect, so close the pipe. 
+            CloseHandle(hPipe);
+    }
+
+    return 0;
+    printf("HelperThreadFn exiting.\n");
+    return 1;
+}
+
+
+DWORD WINAPI InstanceThread(LPVOID lpvParam)
+// This routine is a thread processing function to read from and reply to a client
+// via the open pipe connection passed from the main loop. Note this allows
+// the main loop to continue executing, potentially creating more threads of
+// of this procedure to run concurrently, depending on the number of incoming
+// client connections.
+{
+    HANDLE hHeap = GetProcessHeap();
+    TCHAR* pchRequest = (TCHAR*)HeapAlloc(hHeap, 0, BUFSIZE * sizeof(TCHAR));
+    TCHAR* pchReply = (TCHAR*)HeapAlloc(hHeap, 0, BUFSIZE * sizeof(TCHAR));
+
+    DWORD cbBytesRead = 0, cbReplyBytes = 0, cbWritten = 0;
+    BOOL fSuccess = FALSE;
+    HANDLE hPipe = NULL;
+
+    // Do some extra error checking since the app will keep running even if this
+    // thread fails.
+
+    if (lpvParam == NULL)
+    {
+        printf("\nERROR - Pipe Server Failure:\n");
+        printf("   InstanceThread got an unexpected NULL value in lpvParam.\n");
+        printf("   InstanceThread exitting.\n");
+        if (pchReply != NULL) HeapFree(hHeap, 0, pchReply);
+        if (pchRequest != NULL) HeapFree(hHeap, 0, pchRequest);
+        return (DWORD)-1;
+    }
+
+    if (pchRequest == NULL)
+    {
+        printf("\nERROR - Pipe Server Failure:\n");
+        printf("   InstanceThread got an unexpected NULL heap allocation.\n");
+        printf("   InstanceThread exitting.\n");
+        if (pchReply != NULL) HeapFree(hHeap, 0, pchReply);
+        return (DWORD)-1;
+    }
+
+    if (pchReply == NULL)
+    {
+        printf("\nERROR - Pipe Server Failure:\n");
+        printf("   InstanceThread got an unexpected NULL heap allocation.\n");
+        printf("   InstanceThread exitting.\n");
+        if (pchRequest != NULL) HeapFree(hHeap, 0, pchRequest);
+        return (DWORD)-1;
+    }
+
+    // Print verbose messages. In production code, this should be for debugging only.
+    printf("InstanceThread created, receiving and processing messages.\n");
+
+    // The thread's parameter is a handle to a pipe object instance. 
+
+    hPipe = (HANDLE)lpvParam;
+
+    // Loop until done reading
+    while (1)
+    {
+        // Read client requests from the pipe. This simplistic code only allows messages
+        // up to BUFSIZE characters in length.
+        fSuccess = ReadFile(
+            hPipe,        // handle to pipe 
+            pchRequest,    // buffer to receive data 
+            BUFSIZE * sizeof(TCHAR), // size of buffer 
+            &cbBytesRead, // number of bytes read 
+            NULL);        // not overlapped I/O 
+
+        if (!fSuccess || cbBytesRead == 0)
+        {
+            if (GetLastError() == ERROR_BROKEN_PIPE)
+            {
+                _tprintf(TEXT("InstanceThread: client disconnected.\n"));
+            }
+            else
+            {
+                _tprintf(TEXT("InstanceThread ReadFile failed, GLE=%d.\n"), GetLastError());
+            }
+            break;
+        }
+
+        // Process the incoming message.
+        GetAnswerToRequest(pchRequest, pchReply, &cbReplyBytes);
+
+        printf("number of bytes: %i\n", cbReplyBytes);
+
+        // Write the reply to the pipe. 
+        fSuccess = WriteFile(
+            hPipe,        // handle to pipe 
+            pchReply,     // buffer to write from 
+            cbReplyBytes, // number of bytes to write 
+            &cbWritten,   // number of bytes written 
+            NULL);        // not overlapped I/O 
+
+        if (!fSuccess || cbReplyBytes != cbWritten)
+        {
+            _tprintf(TEXT("InstanceThread WriteFile failed, GLE=%d.\n"), GetLastError());
+            break;
+        }
+    }
+
+    // Flush the pipe to allow the client to read the pipe's contents 
+    // before disconnecting. Then disconnect the pipe, and close the 
+    // handle to this pipe instance. 
+
+    FlushFileBuffers(hPipe);
+    DisconnectNamedPipe(hPipe);
+    CloseHandle(hPipe);
+
+    HeapFree(hHeap, 0, pchRequest);
+    HeapFree(hHeap, 0, pchReply);
+
+    printf("InstanceThread exiting.\n");
+    return 1;
+}
+
+VOID GetAnswerToRequest(LPTSTR pchRequest, LPTSTR pchReply, LPDWORD pchBytes)
+{
+    _tprintf(TEXT("Client Request String:\"%s\"\n"), pchRequest);
+    LPCTSTR reply = TEXT("Hopefully it's working.");
+
+    // Check the outgoing message to make sure it's not too long for the buffer.
+    if (FAILED(StringCchCopy(pchReply, BUFSIZE, reply)))
+    {
+        *pchBytes = 0;
+        pchReply[0] = 0;
+        printf("StringCchCopy failed, no outgoing message.\n");
+        return;
+    }
+    *pchBytes = (lstrlen(pchReply) + 1) * sizeof(TCHAR);
+}
+
 time_t gridButtonDownTime[64];
 time_t gridButtonUpTime[64];
-std::vector<int>gridButtonsPressed = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
+int gridButtonsPressed[10] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+int gridButtonsPressedIterator = 0;
 int lastPressedGridButton[2] = { 0, 0 };
 int tempVelocity = 0;
 int tempNote = 0;
@@ -601,19 +829,8 @@ void gridMidiInCB(double deltatime, std::vector< unsigned char >* message, void*
         std::cout << "stamp = " << deltatime << std::endl;
     */
 
-
-
     int gridY = (((int)message->at(1) / 10) | 0) - 1;
     int gridX = ((int)message->at(1) % 10) - 1;
-
-
-
-
-
-
-
-
-
 
     // if the first byte of the message was 176 and the 3rd was 127, then that was a button down
     // for any button not on the grid.
@@ -748,59 +965,69 @@ void gridMidiInCB(double deltatime, std::vector< unsigned char >* message, void*
             gridButtonDownTime[gridX + (8 * gridY)] = dateNowMillis();
             gridState.patterns[gridState.currentSelectedPattern].toggleButton(gridX, gridY);
             copyCurrentPatternGridEnabledToGridColor();
-            gridButtonsPressed.push_back((int)message->at(1));
-            //gridButtonsPressed.shift();
-            gridButtonsPressed.erase(gridButtonsPressed.begin());
+            for (int i = 0; i < 9; i++) {
+                gridButtonsPressed[i] = gridButtonsPressed[i + 1];
+            }
+            gridButtonsPressed[9] = (int)message->at(1);
             lastPressedGridButton[0] = gridX;
             lastPressedGridButton[1] = gridY;
         }
         if ((int)message->at(0) == 144 && (int)message->at(2) == 0) {
             gridButtonUpTime[gridX + (8 * gridY)] = dateNowMillis();
             int pressedArrayIndex = 0;
-            auto result = std::find_if(gridButtonsPressed.begin(), gridButtonsPressed.end(), [=](int el) {return el == (int)message->at(1); });
-            pressedArrayIndex = *result;
-            std::cout << pressedArrayIndex << std::endl;
-            /*int numberOfPressedButtons = 10 - gridButtonsPressed.findIndex(el = > el > 0);
-            gridButtonsPressed.splice(pressedArrayIndex, 1);
-            gridButtonsPressed.unshift(0);
+            int* el = std::find_if(std::begin(gridButtonsPressed), std::end(gridButtonsPressed), [=](int el) {return el == (int)message->at(1); });
+            if (el != std::end(gridButtonsPressed)) {
+                pressedArrayIndex = std::distance(gridButtonsPressed, el);
+                //std::cout << "pressed array index: " << pressedArrayIndex << std::endl;
+            }
+
+            int numberOfPressedButtons = 0;
+            el = std::find_if(std::begin(gridButtonsPressed), std::end(gridButtonsPressed), [=](int el) {return el > 0; });
+            if (el != std::end(gridButtonsPressed)) {
+                numberOfPressedButtons = 10 - std::distance(gridButtonsPressed, el);
+                //std::cout << "numberOfPressedButtons: " << numberOfPressedButtons << std::endl;
+            }
+             
+            for (int i = pressedArrayIndex; i < 9; i++) {
+                gridButtonsPressed[i] = gridButtonsPressed[i + 1];
+            }
+            gridButtonsPressed[9] = 0;
+                        
             // checking that this button release corresponds to a single button being pressed.
             if (numberOfPressedButtons == 1) {
                 // check time this button was pressed
-                let timePressed = gridButtonUpTime[gridX + (8 * gridY)] - gridButtonDownTime[gridX + (8 * gridY)];
+                time_t timePressed = gridButtonUpTime[gridX + (8 * gridY)] - gridButtonDownTime[gridX + (8 * gridY)];
                 // console.log({timePressed});
                 //check for long press
                 if (timePressed > 1000) {
                     //enter gridNote options mode
                     gridState.gridMode = "gridNoteOpts";
                     clearGrid();
-                    //drawGridNoteOpts();
+                    drawGridNoteOpts();
                     tempVelocity = gridState.patterns[gridState.currentSelectedPattern].getVelocity(gridX, gridY);
                     tempNote = gridState.patterns[gridState.currentSelectedPattern].getNote(gridX, gridY);
-                    if (!gridState.patterns[gridState.currentSelectedPattern].getNoteEnabled(gridX, gridY)) {
+                    if (!gridState.patterns[gridState.currentSelectedPattern].getNoteEnabled(gridX, gridY,1)) {
                         gridState.patterns[gridState.currentSelectedPattern].toggleButton(gridX, gridY);
                     }
                 }
-            }*/
+            }
         }
-    }/*
-    case "patternOpts1": {
-        if (message[0] == 144 && message[2] == 127) {
-            let numSteps = (gridY * 8) + gridX + 1;
+    }else if(gridState.gridMode == "patternOpts1"){
+        if ((int)message->at(0) == 144 && (int)message->at(2) == 127) {
+            int numSteps = (gridY * 8) + gridX + 1;
             gridState.patterns[gridState.currentSelectedPattern].xSize = numSteps;
             gridState.gridMode = "patternOpts2";
-            sendScrollTextToLaunchPad("Y steps", 15);
+            sendScrollTextToLP(gridMidiOut,"Y steps", 127, 127, 127, 15);
         }
-        break;
-    }
-    case "patternOpts2": {
-        if (message[0] == 144 && message[2] == 127) {
-            let numSteps = (gridY * 8) + gridX + 1;
+    }else if (gridState.gridMode == "patternOpts2"){
+        if ((int)message->at(0) == 144 && (int)message->at(2) == 127) {
+            int numSteps = (gridY * 8) + gridX + 1;
             gridState.patterns[gridState.currentSelectedPattern].ySize = numSteps;
             gridState.gridMode = "patternOpts3";
-            sendScrollTextToLaunchPad("X step size", 15);
+            sendScrollTextToLP(gridMidiOut, "X step size", 127, 127, 127, 15);
         }
-        break;
     }
+    /*
     case "patternOpts3": {
         if (message[0] == 144 && message[2] == 127) {
             gridState.patterns[gridState.currentSelectedPattern].stepSizeX = ((gridY * 8) + gridX + 1);
@@ -830,8 +1057,8 @@ void gridMidiInCB(double deltatime, std::vector< unsigned char >* message, void*
     case "patternOpts8": {
         copyCurrentPatternGridEnabledToGridColor();
         break;
-    }
-    case "gridNoteOpts": {
+    }*/
+    else if(gridState.gridMode == "gridNoteOpts"){
         // each button in this mode will set a temporary value that gets set when the confirm / ok button is pressed. 
         // for the buttons that set velocity, change the velocity settings for the slected note when the button is pressed.
         if (gridY == 4) {
@@ -850,26 +1077,26 @@ void gridMidiInCB(double deltatime, std::vector< unsigned char >* message, void*
                 gridState.gridMode = "normal";
                 gridState.patterns[gridState.currentSelectedPattern].setVelocity(lastPressedGridButton[0], lastPressedGridButton[1], tempVelocity);
                 gridState.patterns[gridState.currentSelectedPattern].setNote(lastPressedGridButton[0], lastPressedGridButton[1], tempNote);
-                gridState.patterns[gridState.currentSelectedPattern].setNoteLength(lastPressedGridButton[0], lastPressedGridButton[1], calculateNoteLength(tempnoteLength, gridState.bpm));
+                gridState.patterns[gridState.currentSelectedPattern].setNoteLength(lastPressedGridButton[0], lastPressedGridButton[1], calculateNoteLength(tempnoteLength[0], tempnoteLength[1], gridState.bpm));
                 clearGrid();
                 copyCurrentPatternGridEnabledToGridColor();
             }
         }
         // console.log({tempVelocity})
 
-        if (message[0] == 144 && message[2] == 127) {
+        if ((int)message->at(0) == 144 && (int)message->at(2) == 127) {
             // note-on message
             // check for note buttons on grid
             if (gridY == 1) {
-                let naturalNoteOffsets = [0, 2, 4, 5, 7, 9, 11, 12];
+                int naturalNoteOffsets[9] = { 0, 2, 4, 5, 7, 9, 11, 12 , 0};
                 tempNote = naturalNoteOffsets[gridX] + (tempOctave * 12);
                 // console.log({tempNote})
-                playNote(gridState.patterns[gridState.currentSelectedPattern].getOutPort().portIndex, gridState.patterns[gridState.currentSelectedPattern].getOutPort().channel, tempNote, tempVelocity, gridState.patterns[gridState.currentSelectedPattern].getNoteLength(lastPressedGridButton[0], lastPressedGridButton[1]));
+                playNoteGlobal(gridState.patterns[gridState.currentSelectedPattern].getOutPort().portIndex, gridState.patterns[gridState.currentSelectedPattern].getOutPort().channel, tempNote, tempVelocity, gridState.patterns[gridState.currentSelectedPattern].getNoteLength(lastPressedGridButton[0], lastPressedGridButton[1]));
             }
             else if (gridY == 2) {
-                let sharpFlatNoteOffsets = [0, 1, 3, 3, 6, 8, 10, 12];
+                int sharpFlatNoteOffsets[9] = { 0, 1, 3, 3, 6, 8, 10, 12 , 0};
                 tempNote = sharpFlatNoteOffsets[gridX] + (tempOctave * 12);
-                playNote(gridState.patterns[gridState.currentSelectedPattern].getOutPort().portIndex, gridState.patterns[gridState.currentSelectedPattern].getOutPort().channel, tempNote, tempVelocity, gridState.patterns[gridState.currentSelectedPattern].getNoteLength(lastPressedGridButton[0], lastPressedGridButton[1]));
+                playNoteGlobal(gridState.patterns[gridState.currentSelectedPattern].getOutPort().portIndex, gridState.patterns[gridState.currentSelectedPattern].getOutPort().channel, tempNote, tempVelocity, gridState.patterns[gridState.currentSelectedPattern].getNoteLength(lastPressedGridButton[0], lastPressedGridButton[1]));
                 // console.log({tempNote})
             }
             else if (gridY == 0) {
@@ -877,30 +1104,32 @@ void gridMidiInCB(double deltatime, std::vector< unsigned char >* message, void*
             }
             else if (gridY == 6) {
                 // tempnoteLength = gridX + 1;
-                gridButtonDownTime[gridX + (8 * gridY)] = Date.now();
-                gridButtonsPressed.push(message[1]);
-                gridButtonsPressed.shift();
+                gridButtonDownTime[gridX + (8 * gridY)] = dateNowMillis();
+                for (int i = 0; i < 9; i++) {
+                    gridButtonsPressed[i] = gridButtonsPressed[i + 1];
+                }
+                gridButtonsPressed[9] = (int)message->at(1);
             }
 
         }
-        else if (message[0] == 144 && message[2] == 0) {
+        else if ((int)message->at(0) == 144 && (int)message->at(2) == 0) {
             if (gridY == 1) {
                 // @todo play note
-                let naturalNoteOffsets = [0, 2, 4, 5, 7, 9, 11, 12];
+                int naturalNoteOffsets[8] = { 0, 2, 4, 5, 7, 9, 11, 12 };
                 tempNote = naturalNoteOffsets[gridX] + (tempOctave * 12);
                 // console.log({tempNote})
-                playNote(gridState.patterns[gridState.currentSelectedPattern].getOutPort().portIndex, gridState.patterns[gridState.currentSelectedPattern].getOutPort().channel, tempNote, 0);
+                playNoteGlobal(gridState.patterns[gridState.currentSelectedPattern].getOutPort().portIndex, gridState.patterns[gridState.currentSelectedPattern].getOutPort().channel, tempNote, 0, -1);
             }
             else if (gridY == 2) {
-                let sharpFlatNoteOffsets = [0, 1, 3, 3, 6, 8, 10, 12];
+                int sharpFlatNoteOffsets[8] = { 0, 1, 3, 3, 6, 8, 10, 12 };
                 tempNote = sharpFlatNoteOffsets[gridX] + (tempOctave * 12);
-                playNote(gridState.patterns[gridState.currentSelectedPattern].getOutPort().portIndex, gridState.patterns[gridState.currentSelectedPattern].getOutPort().channel, tempNote, 0);
+                playNoteGlobal(gridState.patterns[gridState.currentSelectedPattern].getOutPort().portIndex, gridState.patterns[gridState.currentSelectedPattern].getOutPort().channel, tempNote, 0, -1);
                 // console.log({tempNote})
             }
             else if (gridY == 6) {
                 // tempnoteLength = gridX + 1;
-                gridButtonUpTime[gridX + (8 * gridY)] = Date.now();
-                let pressedArrayIndex = gridButtonsPressed.findIndex(el = > el == message[1]);
+                gridButtonUpTime[gridX + (8 * gridY)] = dateNowMillis();
+                /*int pressedArrayIndex = gridButtonsPressed.findIndex(el = > el == message[1]);
                 let numberOfPressedButtons = 10 - gridButtonsPressed.findIndex(el = > el > 0);
                 gridButtonsPressed.splice(pressedArrayIndex, 1);
                 gridButtonsPressed.unshift(0);
@@ -918,17 +1147,16 @@ void gridMidiInCB(double deltatime, std::vector< unsigned char >* message, void*
                         // drawGridNoteOpts();
                         // tempVelocity = gridState.patterns[gridState.currentSelectedPattern].getVelocity(gridX, gridY);
                         // tempNote = gridState.patterns[gridState.currentSelectedPattern].getNote(gridX, gridY);
-                        console.log("break")
-                            tempnoteLength[0] = gridX;
+                        //console.log("break")
+                        tempnoteLength[0] = gridX;
                     }
                     else {
                         tempnoteLength[1] = gridX;
                     }
-                }
+                }*/
             }
         }
-        break;
-    }*/
+    }
     
 
 
@@ -1084,7 +1312,7 @@ void copyCurrentPatternGridEnabledToGridColor() {
     }
 }
 
-void clearGrid(gS_t& gridState) {
+void clearGrid() {
     for (int x = 0; x < 8; x++) {
         for (int y = 0; y < 8; y++) {
             gridState.gridColor[x][y].r = 0;
@@ -1099,7 +1327,7 @@ int noteOffFuturesArrayIndex = 0;
 
 void playNoteGlobal(int portI, int chan, int note, int vel, int len) {
     // check that this should be sent to midi device
-    if (portI < 1000) {
+    if (portI < 128) {
         // check that the midi device is enabled
         if (midiOutputDevicesEnabled[portI]) {
             if (vel > 0) {
@@ -1111,19 +1339,6 @@ void playNoteGlobal(int portI, int chan, int note, int vel, int len) {
                 midiOut[portI]->sendMessage(&message);
                 // check for -1 which means that the note gets turned off manually
                 if (len != -1) {
-                    /*noteOffFuturesArray[noteOffFuturesArrayIndex] = std::async(std::launch::async, [=]() {
-                        //std::cout << "send note off" << std::endl;
-                        Sleep(len);
-                        std::vector<unsigned char>message;
-                        message.push_back(noteOffMessage | chan);
-                        message.push_back(note);
-                        message.push_back(0);
-                        midiOut[portI]->sendMessage(&message);
-                        
-                        return;
-                    });
-                    noteOffFuturesArrayIndex++;
-                    if (noteOffFuturesArrayIndex >= 128)noteOffFuturesArrayIndex = 0;*/
                     currentPlayingNotes[currentPlayingNotesIndex].channel = chan;
                     currentPlayingNotes[currentPlayingNotesIndex].note = note;
                     currentPlayingNotes[currentPlayingNotesIndex].portIndex = portI;
@@ -1167,4 +1382,64 @@ int calculateNoteLength(int noteLengthIndex_x, int noteLengthIndex_y, int bpm) {
     float secondsPerMeasure = 60 / (float(bpm) / 4);
     float noteTime = secondsPerMeasure * noteLengthArray[noteLengthIndex_x][noteLengthIndex_y];
     return int(noteTime * 1000);
+}
+
+
+void drawGridNoteOpts() {
+    // cancel, top left
+    gridState.gridColor[0][7].r = 127;
+    // ok, top right
+    gridState.gridColor[7][7].g = 127;
+    // note length, row 2
+    for (int x = 0; x < 8; x++) {
+        gridState.gridColor[x][6].r = 127;
+        gridState.gridColor[x][6].b = 0;
+        gridState.gridColor[x][6].g = 127;
+    }
+    // octaves, bottom row
+    for (int x = 0; x < 8; x++) {
+        gridState.gridColor[x][0].r = 127;
+        gridState.gridColor[x][0].b = 127;
+    }
+    // keyboard, C's
+    gridState.gridColor[7][1].r = 127;
+    gridState.gridColor[7][1].b = 127;
+    gridState.gridColor[0][1].r = 127;
+    gridState.gridColor[0][1].b = 127;
+    // keyboard, naturals
+    for (int x = 1; x < 7; x++) {
+        gridState.gridColor[x][1].r = 127;
+        gridState.gridColor[x][1].b = 127;
+        gridState.gridColor[x][1].g = 127;
+    }
+    //keyboard, sharps/flats
+    gridState.gridColor[1][2].r = 127;
+    gridState.gridColor[1][2].b = 127;
+    gridState.gridColor[1][2].g = 127;
+
+    gridState.gridColor[2][2].r = 127;
+    gridState.gridColor[2][2].b = 127;
+    gridState.gridColor[2][2].g = 127;
+
+    gridState.gridColor[4][2].r = 127;
+    gridState.gridColor[4][2].b = 127;
+    gridState.gridColor[4][2].g = 127;
+
+    gridState.gridColor[5][2].r = 127;
+    gridState.gridColor[5][2].b = 127;
+    gridState.gridColor[5][2].g = 127;
+
+    gridState.gridColor[6][2].r = 127;
+    gridState.gridColor[6][2].b = 127;
+    gridState.gridColor[6][2].g = 127;
+
+    // velocity, rows 4,5
+    for (int x = 0; x < 8; x++) {
+        for (int y = 4; y <= 5; y++) {
+            int val = ((((((y - 4) * 8) + x) / 2) * ((((y - 4) * 8) + x) / 2)) | 0) + 5;
+            gridState.gridColor[x][y].r = 0;
+            gridState.gridColor[x][y].b = val;
+            gridState.gridColor[x][y].g = val;
+        }
+    }
 }

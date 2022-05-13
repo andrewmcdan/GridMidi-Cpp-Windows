@@ -1,0 +1,21 @@
+{
+  "name": "gui-electron-app",
+  "version": "1.0.0",
+  "description": "",
+  "main": "main.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "electron ."
+  },
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "bindings": "~1.2.1",
+    "electron": "^18.2.3",
+    "electron-packager": "^15.5.1",
+    "node-addon-api": "^3.0.0"
+  },
+  "dependencies": {
+    "child-process": "^1.0.2"
+  }
+}
