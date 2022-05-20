@@ -17,17 +17,25 @@
 #include <stdio.h> 
 #include <tchar.h>
 #include <strsafe.h>
+#include <atlbase.h>
 
-#define BUFSIZE 512
+#define DEBUG_EN
+#define BUFSIZE 8192
 
 const int DEFAULT_xSize = 12;
 const int DEFAULT_ySize = 8;
 const int DEFAULT_maxXsize = 64;
 const int DEFAULT_maxYsize = 64;
+const int DEFAULT_maxXstepSize = 384;
+const int DEFAULT_maxYstepSize = 384;
 
 // these constants get OR'ed with the channel when creating MIDI messages.
 const unsigned char noteOnMessage = 0b10010000;
 const unsigned char noteOffMessage = 0x80;
+
+const unsigned char PLAYSTART_TYPE_IMMEDIATE = 1;
+const unsigned char PLAYSTART_TYPE_NEXTBEAT = 2;
+const unsigned char PLAYSTART_TYPE_NEXTBAR = 3;
 
 // Play a note through a midi device
 // portI:   index of the midi device in the midiout array
@@ -36,6 +44,13 @@ const unsigned char noteOffMessage = 0x80;
 // vel:     note velocity
 // len:     note length in milliseconds
 void playNoteGlobal(int portI, int chan, int note, int vel, int len);
+int calculateNoteLength(int noteLengthIndex_x, int noteLengthIndex_y);
+
+// program state struct for keeping track of program state
+struct {
+    bool midiDevsInit = false;
+    bool launchPadInit = false;
+}programState;
 
 // settings struct for globally used settings values.
 const struct {
@@ -46,11 +61,14 @@ const struct {
 
 // struct for holding the data for each note on the grid
 struct gridElement_t {
-    uint8_t enabled;
-    int note;
-    int velocity;
-    int noteLength;
-    bool playing;
+    uint8_t enabled = false;
+    int note = 0;
+    int velocity = 0;
+    int noteLength_ms = 0;
+    int noteLengthFractional_x = 0; 
+    int noteLengthFractional_y = 0;
+    bool noteLengthUseFractional = true;
+    bool playing = false;
 };
 
 // midi output port info
@@ -71,7 +89,7 @@ struct playingNote_t{
     int channel;
 };
 
-class gridPattern_XY_OR {
+class gridPattern {
 public:
     // Set the callback functions for colring the play button
     void setCallBacks(std::function<void()>flashPlayCB, std::function<void()>playBtnOnCB, std::function<void()>playBtnOffCB) {
@@ -79,9 +97,9 @@ public:
         playButtonOff = playBtnOffCB;
         flashPlayButton = flashPlayCB;
     }
-    // gridPattern_XY_OR constructor
+    // gridPattern constructor
     // Generate grid with gridElement's and set default values.
-    gridPattern_XY_OR() {
+    gridPattern() {
         outputPort.portIndex = 1;
         outputPort.channel = 0;
         color.r = 127;
@@ -94,13 +112,14 @@ public:
                 grid[i][u].enabled = 0;
                 grid[i][u].note = 60;
                 grid[i][u].velocity = 100;
-                grid[i][u].noteLength = 500;
+                grid[i][u].noteLength_ms = 500;
+                grid[i][u].noteLengthFractional_x = 3;
+                grid[i][u].noteLengthFractional_y = 0;
                 grid[i][u].playing = false;
             }
         }
     }
     bool toggleButton(int x, int y) {
-        //std::cout << "toggle " << x << ", " << y << std::endl;
         if ((x + this->xViewIndex) < this->xSize && (y + this->yViewIndex) < this->ySize) {
             if (this->grid[x + this->xViewIndex][y + this->yViewIndex].enabled == 1) {
                 this->grid[x + this->xViewIndex][y + this->yViewIndex].enabled = 0;
@@ -108,6 +127,8 @@ public:
             else {
                 this->grid[x + this->xViewIndex][y + this->yViewIndex].enabled = 1;
             }
+            this->lastSelected_X = x + this->xViewIndex;
+            this->lastSelected_Y = y + this->yViewIndex;
             return true;
         }
         return false;
@@ -173,6 +194,14 @@ public:
             this->grid[x][y].velocity = 127;
         }
     }
+    void setVelocity(int x, int y, int val, bool offset) {
+        if (offset) {
+            this->setVelocity(x, y, val);
+        }
+        else {
+            this->setVelocity(x + this->xViewIndex, y + this->yViewIndex, val);
+        }
+    }
     int getVelocity(int x, int y) {
         return this->grid[x][y].velocity;
     }
@@ -185,16 +214,80 @@ public:
             this->grid[x][y].note = 127;
         }
     }
+    void setNote(int x, int y, int val, bool offset) {
+        if (offset) {
+            this->setNote(x, y, val);
+        }
+        else {
+            this->setNote(x + this->xViewIndex, y + this->yViewIndex, val);
+        }
+    }
+
     int getNote(int x, int y) {
         return this->grid[x][y].note;
     }
+    /// <summary>
+    /// Set note length using milliseconds
+    /// </summary>
+    /// <param name="x">grid x value</param>
+    /// <param name="y">grid y value</param>
+    /// <param name="val">length in ms</param>
     void setNoteLength(int x, int y, int val) {
         if (val < 15000) {
-            this->grid[x][y].noteLength = val;
+            this->grid[x][y].noteLength_ms = val;
+            this->grid[x][y].noteLengthUseFractional = false;
+        }
+    }
+    void setNoteLength(int x, int y, int val, bool offset) {
+        if (offset) {
+            this->setNoteLength(x, y, val);
+        }
+        else {
+            this->setNoteLength(x + this->xViewIndex, y + this->yViewIndex, val);
+        }
+    }
+    /// <summary>
+    /// Set note length using calculateNoteLenght()
+    /// </summary>
+    /// <param name="x">Grid x value</param>
+    /// <param name="y">Grid y value</param>
+    /// <param name="val_x">Determines if note is made of half notes, quarternotes, eighths, etc.</param>
+    /// <param name="val_y">Determines how many of the above the note is made of.</param>
+    void setNoteLength(int x, int y, int val_x, int val_y) {
+        if (val_x < 9 && val_y < 9) {
+            this->grid[x][y].noteLengthFractional_x = val_x;
+            this->grid[x][y].noteLengthFractional_y = val_y;
+            this->grid[x][y].noteLengthUseFractional = true;
+        }
+    }
+    void setNoteLength(int x, int y, int val_x, int val_y, bool offset) {
+        if (offset) {
+            this->setNoteLength(x, y, val_x, val_y);
+        }
+        else {
+            this->setNoteLength(x + this->xViewIndex, y + this->yViewIndex, val_x, val_y);
         }
     }
     int getNoteLength(int x, int y) {
-        return this->grid[x][y].noteLength;
+        if (this->grid[x][y].noteLengthUseFractional) {
+            return calculateNoteLength(this->grid[x][y].noteLengthFractional_x, this->grid[x][y].noteLengthFractional_y);
+        }
+        else
+            return this->grid[x][y].noteLength_ms;
+    }
+    void getNoteLengthFractional(int x, int y, int* coords) {
+        coords[0] = this->grid[x][y].noteLengthFractional_x;
+        coords[1] = this->grid[x][y].noteLengthFractional_y;
+    }
+
+    bool getIsUsingFractionalNoteLength(int x, int y, bool offset = false) {
+        if (offset) {
+            return this->grid[x][y].noteLengthUseFractional;
+        }
+        else {
+            return this->grid[x + this->xViewIndex][y + this->yViewIndex].noteLengthUseFractional;
+        }
+        
     }
 
     // return true/false bassed on note enabled or not
@@ -235,37 +328,72 @@ public:
     void playStepX() {
         this->currentXstep++;
         if (this->currentXstep >= this->xSize)this->currentXstep = 0;
-        for (uint8_t i = 0; i < this->grid[this->currentXstep].size(); i++) {
-            if (this->getNoteEnabled(this->currentXstep, i, 0)) {
-                this->playNote(this->currentXstep, i);
+        switch (this->mode) {
+        case patternModes::XY_OR:
+            for (uint8_t i = 0; i < this->grid[this->currentXstep].size(); i++) {
+                if (this->getNoteEnabled(this->currentXstep, i, 0)) {
+                    this->playNote(this->currentXstep, i);
+                }
             }
+            break;
+        default:
+            break;
         }
     }
 
     void playStepY() {
         this->currentYstep++;
         if (this->currentYstep >= this->ySize)this->currentYstep = 0;
-        for (uint8_t i = 0; i < grid.size(); i++) {
-            if (this->getNoteEnabled(i, this->currentYstep, 0) && !this->getNotePlaying(i, this->currentYstep)) {
-                //std::cout << "play y step" << std::endl;
-                this->playNote(i, this->currentYstep);
+
+        switch (this->mode) {
+        case patternModes::XY_OR:
+            for (uint8_t i = 0; i < grid.size(); i++) {
+                if (this->getNoteEnabled(i, this->currentYstep, 0) && !this->getNotePlaying(i, this->currentYstep)) {
+                    this->playNote(i, this->currentYstep);
+                }
             }
+            break;
+        case patternModes::XY_AND:
+            if (this->getNoteEnabled(this->currentXstep, this->currentYstep, 0) && !this->getNotePlaying(this->currentXstep, this->currentYstep)) {
+                this->playNote(this->currentXstep, this->currentYstep);
+            }
+            break;
+        default:
+            break;
         }
+        
     }
 
     void tick() {
         if (this->tickCount % 24 == 0) {
             this->flashPlayButton();
         }
+        switch (this->mode) {
+        case patternModes::XY_OR:
+        case patternModes::XY_AND:
+            if (this->tickCount % this->stepSizeX == 0) {
+                this->playStepX();
+            }
 
-        if (this->tickCount % this->stepSizeX == 0) {
-            this->playStepX();
+            if (this->tickCount % this->stepSizeY == 0) {
+                this->playStepY();
+            }
+            break;
+        case patternModes::X_SEQ:
+            if (this->tickCount % this->stepSizeX == 0) {
+                this->playStepX();
+            }
+            break;
+        case patternModes::Y_SEQ:
+            if (this->tickCount % this->stepSizeY == 0) {
+                this->playStepY();
+            }
+            break;
+        case patternModes::STEP64:
+            break;
+        default:
+            break;
         }
-
-        if (this->tickCount % this->stepSizeY == 0) {
-            this->playStepY();
-        }
-
         this->tickCount++;
         if (this->tickCount >= this->tickResetVal)this->tickCount = 0;
     }
@@ -291,18 +419,36 @@ public:
         return this->outputPort;
     }
 
-    bool setOutPort(int val = -1) {
-        if (val != -1) {
-            // @todo 
-            // set port if enabled, return false if not.
-        }
-        else {
-            return false;
-        }
+    void setOutPort(int portNum, int channel) {
+        this->outputPort.channel = channel;
+        this->outputPort.portIndex = portNum;
     }
 
     void turnOnPlayButton() {
         this->playButtonOn();
+    }
+
+    void setNumStepsAndSizes(uint16_t xNumSteps, uint16_t yNumSteps, uint16_t xStepSize, uint16_t yStepSize) {
+        if (xNumSteps < DEFAULT_maxXsize && yNumSteps < DEFAULT_maxYsize && xStepSize < DEFAULT_maxXstepSize && yStepSize < DEFAULT_maxYstepSize) {
+            this->xSize = xNumSteps;
+            this->ySize = yNumSteps;
+            this->stepSizeX = xStepSize;
+            this->stepSizeY = yStepSize;
+            if (!this->playing) {
+                this->currentXstep = this->xSize;
+                this->currentYstep = this->ySize;
+            }
+        }
+    }
+
+    int getMode() {
+        return this->mode;
+    }
+
+    void setMode(int m) {
+        this->mode = patternModes(m);
+        //this->playing = false;
+        this->tickReset();
     }
 
     std::function<void()>playButtonOn;
@@ -313,6 +459,12 @@ public:
     int currentXstep = xSize;
     int currentYstep = ySize;
     bool playing = false;
+    int playStartType = PLAYSTART_TYPE_IMMEDIATE;
+    uint8_t lastSelected_X = 0;
+    uint8_t lastSelected_Y = 0;
+    int stepSizeX = 24;
+    int stepSizeY = 24;
+    enum patternModes { XY_OR, XY_AND, X_SEQ, Y_SEQ, STEP64, X_then_Y };
 private:
     std::vector<std::vector<gridElement_t>>grid;
     std::future<void>playNoteResetFuturesArray[1024];
@@ -320,21 +472,32 @@ private:
     int xViewIndex = 0;
     int yViewIndex = 0;
     uint32_t tickCount = 0;
-    int stepSizeX = 24;
-    int stepSizeY = 24;
     uint32_t tickResetVal = 2000000;
     outPort_t outputPort;
     color_t color;
+    patternModes mode = XY_OR;
 };
 
 struct gS_t {
     gS_t() {
-        for (int i = 0; i < 16; i++) {
+        // Buttons across top
+        for (int i = 0; i < 8; i++) {
             otherColor.push_back(color_t());
             otherColor[i].r = 10;
             otherColor[i].g = 0;
             otherColor[i].b = 0;
         }
+        // Buttons down the side
+        for (int i = 8; i < 16; i++) {
+            otherColor.push_back(color_t());
+            otherColor[i].r = 0;
+            otherColor[i].g = 0;
+            otherColor[i].b = 0;
+        }
+        // Stop, Solo, Mute button
+        otherColor[8].r = 10;
+        otherColor[8].g = 0;
+        otherColor[8].b = 0;
 
         for (int x = 0; x < 8; x++) {
             gridColor.push_back(std::vector<color_t>());
@@ -351,7 +514,7 @@ struct gS_t {
         logoColor.b = 127;
 
         for (int i = 0; i < 7; i++) {
-            patterns.push_back(gridPattern_XY_OR());
+            patterns.push_back(gridPattern());
             patterns[i].setCallBacks(
                 [this, i] () {
                     if (this->currentSelectedPattern == i) {
@@ -386,22 +549,22 @@ struct gS_t {
     std::string gridMode = "normal";
     int currentSelectedPattern = 0;
     int numberOfPlayingPatterns = 0;
-    std::vector<gridPattern_XY_OR>patterns;
+    std::vector<gridPattern>patterns;
     bool playing = false;
 };
 
-void gridMidiInCB(double deltatime, std::vector< unsigned char >* message, void* /*userData*/);
-void setLPtoProgrammerMode(RtMidiOut* rtmidiout);
-void sendWelcomeMessage(RtMidiOut* rtmidiout);
-void sendScrollTextToLP(RtMidiOut* rtmidiout, std::string textToSend, uint8_t red, uint8_t grn, uint8_t blu, uint8_t speed);
+void gridMidiInCB(double, std::vector< unsigned char >* message, void* /*userData*/);
+void setLPtoProgrammerMode(RtMidiOut*);
+void sendWelcomeMessage(RtMidiOut*);
+void sendScrollTextToLP(RtMidiOut*, std::string, uint8_t, uint8_t, uint8_t, uint8_t);
 time_t dateNowMillis();
 time_t dateNowMicros();
 time_t sendColors(time_t lastSentTime, RtMidiOut* rtmidiout, bool overrideThrottle);
 void copyCurrentPatternGridEnabledToGridColor();
 void clearGrid();
-int calculateNoteLength(int noteLengthIndex_x, int noteLengthIndex_y, int bpm);
 void drawGridNoteOpts();
-DWORD WINAPI helperThreadFn(LPVOID lpvParam);
+void updateMidiDevices();
+DWORD WINAPI helperThreadFn(LPVOID);
 DWORD WINAPI InstanceThread(LPVOID);
 VOID GetAnswerToRequest(LPTSTR, LPTSTR, LPDWORD);
 
@@ -409,17 +572,21 @@ gS_t gridState;
 
 RtMidiIn* gridMidiIn = 0; // RTmidi object for LPminiMK3
 RtMidiIn* midiIn[128]; // RTmidi objects for all other midi devs
-uint16_t gridMidiInDevIndex = 0; // indicates which element in midiIn[] will be uninitialized due to it correlating to LPminiMK3
+int gridMidiInDevIndex = -1; // indicates which element in midiIn[] will be uninitialized due to it correlating to LPminiMK3
 uint16_t numMidiInDevs = 0;
 std::string midiInPortNames[128];
+int keyboardInputDevIndex = -1;
+bool midiInputDevicesEnabled[128];
 
 RtMidiOut* gridMidiOut = 0; // RtMidi object for LPminiMK3
 RtMidiOut* midiOut[128]; // RtMidi objects for all other midi devs
-uint16_t gridMidiOutDevIndex = 0;
+int gridMidiOutDevIndex = -1;
 uint16_t numMidiOutDevs = 0;
 std::string midiOutPortNames[128];
 bool midiOutputDevicesEnabled[128];
 bool midiOutputDevicesClockEn[128];
+int drumsModeOutputDevIndex = -1;
+int keysModeOutputDevIndex = -1;
 
 playingNote_t currentPlayingNotes[1024];
 time_t playingNotesExpireTimes[1024];
@@ -450,41 +617,20 @@ int main(int argc, char *argv[])
     for (int i = 0; i < 128; i++) {
         midiOutputDevicesEnabled[i] = false;
         midiOutputDevicesClockEn[i] = false;
+        midiInputDevicesEnabled[i] = false;
     }
 
     for (int i = 0; i < 1024; i++) {
         playingNotesExpireTimes[i] = 0;
     }
-    
+
     try {
-        // initialize all the placeholders for midi devices.
+        // init all the placeholders for midi devices
         for (int i = 0; i < 128; i++) {
             midiIn[i] = new RtMidiIn();
         }
-        
         // init gridmidiIn
         gridMidiIn = new RtMidiIn();
-        numMidiInDevs = gridMidiIn->getPortCount();
-        std::string portName;
-        
-        // go through all available midi devices and look for the LPminiMK3
-        for (uint16_t i = 0; i < numMidiInDevs; i++) {
-            portName = gridMidiIn->getPortName(i);
-            std::string LPminiMK3_name = "MIDIIN2 (LPMiniMK3 MIDI)";
-            int val = portName.compare(0, LPminiMK3_name.size(), LPminiMK3_name);
-            midiInPortNames[i] = portName;
-            if (val == 0) {
-                gridMidiIn->openPort(i);
-                gridMidiIn->setCallback(&gridMidiInCB);
-                // Don't ignore sysex, timing, or active sensing messages.
-                gridMidiIn->ignoreTypes(true, true, true);
-                gridMidiInDevIndex = i;
-            }
-            else {
-                midiIn[i]->openPort(i);
-                midiIn[i]->ignoreTypes(false, false, false);
-            }
-        }
     }
     catch (RtMidiError& error) {
         error.printMessage();
@@ -497,32 +643,13 @@ int main(int argc, char *argv[])
 
         // init gridmidiout
         gridMidiOut = new RtMidiOut();
-        numMidiOutDevs = gridMidiOut->getPortCount();
-        std::string portName;
-        //go through all midi out devices and look for LPminiMK3
-        for (uint16_t i = 0; i < numMidiOutDevs; i++) {
-            portName = gridMidiOut->getPortName(i);
-            std::cout << portName << std::endl;
-            std::string LPminiMK3_name = "MIDIOUT2 (LPMiniMK3 MIDI)";
-            int val = portName.compare(0, LPminiMK3_name.size(), LPminiMK3_name);
-            //std::cout << "portNAME: " << portName << std::endl << "compare result: " << val << std::endl;
-            midiOutPortNames[i] = portName;
-            if (val == 0) {
-                gridMidiOut->openPort(i);
-                gridMidiOutDevIndex = i;
-            }
-            else {
-                midiOut[i]->openPort(i);
-                midiOutputDevicesEnabled[i] = true;
-                midiOutputDevicesClockEn[i] = false;
-            }
-        }
     }
     catch (RtMidiError& error) {
         error.printMessage();
     }
+    updateMidiDevices();
 
-    gridPattern_XY_OR pat;
+    programState.midiDevsInit = true;
 
     setLPtoProgrammerMode(gridMidiOut);
     sendWelcomeMessage(gridMidiOut);
@@ -533,10 +660,8 @@ int main(int argc, char *argv[])
     time_t interval_1ms = 0;
     time_t interval_30ms = 0;
     time_t interval_2s = 0;
-
-    std::cout << "Press any key to exit." << std::endl;
-
     time_t tickTimer_1 = dateNowMillis();
+    int logoCycleCount = 0;
 
     while (1) {
         tempTime = dateNowMicros();
@@ -585,35 +710,49 @@ int main(int argc, char *argv[])
             interval_30ms = 0;
             copyCurrentPatternGridEnabledToGridColor();
             sendColors(0, gridMidiOut, true);
+            double frequency = 0.1;
+            gridState.logoColor.r = int(sin(frequency * logoCycleCount + 0) * 63 + 64) | 0;
+            gridState.logoColor.g = int(sin(frequency * logoCycleCount + 2) * 63 + 64) | 0;
+            gridState.logoColor.b = int(sin(frequency * logoCycleCount + 4) * 63 + 64) | 0;
+            logoCycleCount++;
+            if (logoCycleCount >= 64)logoCycleCount = 0;
         }
 
         if (interval_2s > 2000000) {
             interval_2s = 0;
-            //gridState.patterns[gridState.currentSelectedPattern].toggleButton(1,1);
-            //std::cout << "2 seconds" << std::endl;
         }
         
-        if (_kbhit())
+        if (_kbhit()) {
+#ifdef DEBUG_EN
             break;
-        auto x = std::chrono::steady_clock::now() + std::chrono::microseconds(10);
-        std::this_thread::sleep_until(x);
+#endif // DEBUG_EN
+            std::string s = "";
+            std::cout << "Exit? (y/n): ";
+            std::cin >> s;
+            if(s=="y")break;
+        }
+        std::this_thread::sleep_until(std::chrono::steady_clock::now() + std::chrono::microseconds(10));
     }
 
     for (int i = 0; i < 128; i++) {
         delete midiIn[i];
     }
     delete gridMidiIn;
-    std::cout << std::endl;
+    for (int i = 0; i < 128; i++) {
+        delete midiOut[i];
+    }
+    delete gridMidiOut;
     return 0;
 }
 
-
 DWORD WINAPI helperThreadFn(LPVOID lpvParam) {
-    printf("from helper thread\n");
+#ifdef DEBUG_EN
+    printf("Helper thread started...\n");
+#endif // DEBUG_EN
     BOOL   fConnected = FALSE;
     DWORD  dwThreadId = 0;
     HANDLE hPipe = INVALID_HANDLE_VALUE, hThread = NULL;
-    LPCTSTR lpszPipename = TEXT("\\\\.\\pipe\\mynamedpipe");
+    LPCTSTR lpszPipename = TEXT("\\\\.\\pipe\\gridMidi");
 
     // The main loop creates an instance of the named pipe and 
     // then waits for a client to connect to it. When the client 
@@ -623,7 +762,9 @@ DWORD WINAPI helperThreadFn(LPVOID lpvParam) {
 
     for (;;)
     {
-        _tprintf(TEXT("\nPipe Server: Main thread awaiting client connection on %s\n"), lpszPipename);
+#ifdef DEBUG_EN
+        //_tprintf(TEXT("Pipe Server: Helper thread awaiting client connection on %s\n"), lpszPipename);
+#endif // DEBUG_EN
         hPipe = CreateNamedPipe(
             lpszPipename,             // pipe name 
             PIPE_ACCESS_DUPLEX,       // read/write access 
@@ -651,7 +792,7 @@ DWORD WINAPI helperThreadFn(LPVOID lpvParam) {
 
         if (fConnected)
         {
-            printf("Client connected, creating a processing thread.\n");
+            //printf("Client connected, creating a processing thread.\n");
 
             // Create a thread for this client. 
             hThread = CreateThread(
@@ -674,11 +815,10 @@ DWORD WINAPI helperThreadFn(LPVOID lpvParam) {
             CloseHandle(hPipe);
     }
 
-    return 0;
+    //return 0;
     printf("HelperThreadFn exiting.\n");
     return 1;
 }
-
 
 DWORD WINAPI InstanceThread(LPVOID lpvParam)
 // This routine is a thread processing function to read from and reply to a client
@@ -727,7 +867,7 @@ DWORD WINAPI InstanceThread(LPVOID lpvParam)
     }
 
     // Print verbose messages. In production code, this should be for debugging only.
-    printf("InstanceThread created, receiving and processing messages.\n");
+    //printf("InstanceThread created, receiving and processing messages.\n");
 
     // The thread's parameter is a handle to a pipe object instance. 
 
@@ -749,7 +889,7 @@ DWORD WINAPI InstanceThread(LPVOID lpvParam)
         {
             if (GetLastError() == ERROR_BROKEN_PIPE)
             {
-                _tprintf(TEXT("InstanceThread: client disconnected.\n"));
+                //_tprintf(TEXT("InstanceThread: client disconnected.\n"));
             }
             else
             {
@@ -761,7 +901,7 @@ DWORD WINAPI InstanceThread(LPVOID lpvParam)
         // Process the incoming message.
         GetAnswerToRequest(pchRequest, pchReply, &cbReplyBytes);
 
-        printf("number of bytes: %i\n", cbReplyBytes);
+        //printf("number of bytes: %i\n", cbReplyBytes);
 
         // Write the reply to the pipe. 
         fSuccess = WriteFile(
@@ -789,17 +929,319 @@ DWORD WINAPI InstanceThread(LPVOID lpvParam)
     HeapFree(hHeap, 0, pchRequest);
     HeapFree(hHeap, 0, pchReply);
 
-    printf("InstanceThread exiting.\n");
+    //printf("InstanceThread exiting.\n");
     return 1;
 }
 
 VOID GetAnswerToRequest(LPTSTR pchRequest, LPTSTR pchReply, LPDWORD pchBytes)
 {
-    _tprintf(TEXT("Client Request String:\"%s\"\n"), pchRequest);
-    LPCTSTR reply = TEXT("Hopefully it's working.");
+#ifdef DEBUG_EN1
+    time_t before = dateNowMicros();
+#endif // DEBUG_EN
+    // check that controller is ready
+    if (!programState.midiDevsInit || !programState.launchPadInit) {
+        *pchBytes = 0;
+        pchReply[0] = 0;
+        printf("Controller not ready (midiDevsInit).\n");
+#ifdef DEBUG_EN1
+        time_t after = dateNowMicros();
+        std::cout << "time: " << after - before << std::endl;
+#endif // DEBUG
+        return;
+    }
 
+    _tprintf(TEXT("Client Request String:\"%s\"\n"), pchRequest);
+    ///////////////////////////////////////////////////////////////
+    // process IPC string
+    std::string stdString_Request;
+    std::string reply = "";
+    std::wstring w = pchRequest;
+    stdString_Request = std::string(w.begin(), w.end()); // magic here
+    if (stdString_Request.substr(0,7) == "isReady") {
+        reply = "ready";
+        // Check the outgoing message to make sure it's not too long for the buffer.
+        if (FAILED(StringCchCopy(pchReply, BUFSIZE, std::wstring(reply.begin(), reply.end()).c_str()))){
+            *pchBytes = 0;
+            pchReply[0] = 0;
+            printf("StringCchCopy failed, no outgoing message.\n");
+            return;
+        }
+        *pchBytes = (lstrlen(pchReply) + 1) * sizeof(TCHAR);
+#ifdef DEBUG_EN1
+        time_t after = dateNowMicros();
+        std::cout << "time: " << after - before << std::endl;
+#endif // DEBUG_EN
+        return;
+    }
+    std::string command1 = stdString_Request.substr(0, 3); // first 3 characters are either req or dat for request or data
+    std::string command2 = stdString_Request.substr(3, 16); // Next 8 characters are sub commands
+    std::string command3 = "";
+    if(stdString_Request.size() > 18)
+        command3 = stdString_Request.substr(19);   // Remainder of string is formatted per command
+    
+    // "req": request for data
+    if (command1 == "req") {
+        // "numMidiDevs____": request number of midi devices
+        if (command2 == "numMidiDevs_____") {
+            reply = "numMidiInDevs:" + std::to_string(numMidiInDevs) + ";numMidiOutDevs:" + std::to_string(numMidiOutDevs);
+        }
+        // "midiInDevNames_": request names of midi In devices
+        else if (command2 == "midiInDevNames__") {
+            reply = "";
+            for (int i = 0; i < numMidiInDevs; i++) {
+                reply += midiInPortNames[i] + ";\n";
+            }
+        }
+        // "midiOutDevNames": request names of midi out devices
+        else if (command2 == "midiOutDevNames_") {
+            reply = "";
+            for (int i = 0; i < numMidiOutDevs; i++) {
+                reply += midiOutPortNames[i] + ";\n";
+            }
+        }
+        // "getBPM_________": get the current BPM
+        else if (command2 == "getBPM__________") {
+            reply = std::to_string(gridState.bpm);
+        }
+        // "getMOutDevClkEn": get state of clock output enabled for each midi device
+        else if (command2 == "getMOutDevClkEn_") {
+            reply = "";
+            for (int i = 0; i < numMidiOutDevs; i++) {
+                reply += (midiOutputDevicesClockEn[i] ? "1" : "0");
+                reply += i == numMidiOutDevs - 1 ? "" : ":";
+            }
+        }
+        // "getMidiDevOutEn":
+        else if (command2 == "getMidiDevOutEn_") {
+            reply = "";
+            for (int i = 0; i < numMidiOutDevs; i++) {
+                reply += (midiOutputDevicesEnabled[i] ? "1" : "0");
+                reply += i == numMidiOutDevs - 1 ? "" : ":";
+            }
+        }
+        else if (command2 == "getMidiDevInEn__") {
+            reply = "";
+            for (int i = 0; i < numMidiInDevs; i++) {
+                reply += (midiInputDevicesEnabled[i] ? "1" : "0");
+                reply += i == numMidiInDevs - 1 ? "" : ":";
+            }
+        }
+        else if (command2 == "getKbMidiInDev__") {
+            if (keyboardInputDevIndex != -1) {
+                reply = midiInPortNames[keyboardInputDevIndex];
+            }
+            else {
+                reply = "Disabled  ";
+            }
+        }
+        else if (command2 == "getDrumsModeODev") {
+            if (drumsModeOutputDevIndex != -1) {
+                reply = midiOutPortNames[drumsModeOutputDevIndex];
+            }
+            else {
+                reply = "Disabled  ";
+            }
+        }
+        else if (command2 == "getKeysModeODev_") {
+            if (keysModeOutputDevIndex != -1) {
+                reply = midiOutPortNames[keysModeOutputDevIndex];
+            }
+            else {
+                reply = "Disabled  ";
+            }
+        }
+        else if (command2 == "getCurrentGridXY") {
+            reply = "";
+            reply += std::to_string(gridState.patterns[gridState.currentSelectedPattern].lastSelected_X);
+            reply += ":";
+            reply += std::to_string(gridState.patterns[gridState.currentSelectedPattern].lastSelected_Y);
+        }
+        else if (command2 == "getNoteData_____") {
+            reply = "";
+            reply += std::to_string(gridState.patterns[gridState.currentSelectedPattern].getNote(gridState.patterns[gridState.currentSelectedPattern].lastSelected_X, gridState.patterns[gridState.currentSelectedPattern].lastSelected_Y));
+            reply += ":";
+            reply += std::to_string(gridState.patterns[gridState.currentSelectedPattern].getVelocity(gridState.patterns[gridState.currentSelectedPattern].lastSelected_X, gridState.patterns[gridState.currentSelectedPattern].lastSelected_Y));
+            reply += ":";
+            reply += std::to_string(gridState.patterns[gridState.currentSelectedPattern].getNoteLength(gridState.patterns[gridState.currentSelectedPattern].lastSelected_X, gridState.patterns[gridState.currentSelectedPattern].lastSelected_Y));
+            reply += ":";
+            int xy[2] = { 0,0 };
+            gridState.patterns[gridState.currentSelectedPattern].getNoteLengthFractional(gridState.patterns[gridState.currentSelectedPattern].lastSelected_X, gridState.patterns[gridState.currentSelectedPattern].lastSelected_Y, xy);
+            reply += std::to_string(xy[0]);
+            reply += ":";
+            reply += std::to_string(xy[1]);
+            reply += ":";
+            reply += (gridState.patterns[gridState.currentSelectedPattern].getIsUsingFractionalNoteLength(gridState.patterns[gridState.currentSelectedPattern].lastSelected_X, gridState.patterns[gridState.currentSelectedPattern].lastSelected_Y) ? "1" : "0");
+        }
+        else if (command2 == "PatternOptions__") {
+            reply = "";
+            reply += std::to_string(gridState.currentSelectedPattern);
+            reply += ":";
+            reply += std::to_string(gridState.patterns[gridState.currentSelectedPattern].getOutPort().channel);
+            reply += ":";
+            reply += std::to_string(gridState.patterns[gridState.currentSelectedPattern].getMode());
+            reply += ":";
+            reply += std::to_string(gridState.patterns[gridState.currentSelectedPattern].xSize);
+            reply += ":";
+            reply += std::to_string(gridState.patterns[gridState.currentSelectedPattern].ySize);
+            reply += ":";
+            reply += std::to_string(gridState.patterns[gridState.currentSelectedPattern].stepSizeX);
+            reply += ":";
+            reply += std::to_string(gridState.patterns[gridState.currentSelectedPattern].stepSizeY);
+        }
+        else if (command2 == "PatternOutPort__") {
+            reply = "";
+            reply += midiOutPortNames[gridState.patterns[gridState.currentSelectedPattern].getOutPort().portIndex];
+        }
+    }
+    else if (command1 == "dat") {
+#ifdef DEBUG_EN
+        std::cout << "command is data" << std::endl << "command2: " << command2 << std::endl;
+#endif // DEBUG_EN
+        reply = "Data command recieved.";
+        if (command2 == "updateBPM_______") {
+            int newBPM = std::stoi(command3);
+            gridState.bpm = newBPM;
+        }
+        else if (command2 == "selectPattern___") {
+            int patNum = std::stoi(command3);
+            if (patNum < 8 && patNum >= 0) {
+                for (int e = 0; e < 7; e++) {
+                    if (!gridState.patterns[e].playing) {
+                        gridState.patterns[e].playButtonOff();
+                    }
+                }
+                gridState.currentSelectedPattern = patNum;
+                gridState.patterns[patNum].playButtonOn();
+            }
+        }
+        else if (command2 == "setKbInputDev___") {
+            for (int i = 0; i < numMidiInDevs; i++) {
+                if (midiInPortNames[i].find(command3) != std::string::npos) {
+                    keyboardInputDevIndex = i;
+                }
+            }
+        }
+        else if (command2 == "setDrumOutputDev") {
+            for (int i = 0; i < numMidiOutDevs; i++) {
+                if (midiOutPortNames[i].find(command3) != std::string::npos) {
+                    drumsModeOutputDevIndex = i;
+                }
+            }
+        }
+        else if (command2 == "setKeysOutputDev") {
+            for (int i = 0; i < numMidiOutDevs; i++) {
+                if (midiOutPortNames[i].find(command3) != std::string::npos) {
+                    keysModeOutputDevIndex = i;
+                }
+            }
+        }
+        else if (command2 == "setMidiDevInEn__") {
+            for (int i = 0; i < numMidiInDevs; i++) {
+                if (midiInPortNames[i].find(command3.substr(0,command3.length() - 2)) != std::string::npos) {
+                    midiInputDevicesEnabled[i] = command3.substr(command3.find(":") + 1) == "1";
+                }
+            }
+            updateMidiDevices();
+        }
+        else if (command2 == "setMidiOutDevEn_") {
+            for (int i = 0; i < numMidiOutDevs; i++) {
+                if (midiOutPortNames[i].find(command3.substr(0, command3.length() - 2)) != std::string::npos) {
+                    midiOutputDevicesEnabled[i] = command3.substr(command3.find(":") + 1) == "1";
+                }
+            }
+            updateMidiDevices();
+        }
+        else if (command2 == "setMidiOutClkEn_") {
+            for (int i = 0; i < numMidiOutDevs; i++) {
+                if (midiOutPortNames[i].find(command3.substr(0, command3.length() - 2)) != std::string::npos) {
+                    midiOutputDevicesClockEn[i] = command3.substr(command3.find(":") + 1) == "1";
+                }
+            }
+        }
+        else if (command2 == "setNoteValue____") {
+            int x = std::stoi(command3.substr(0, command3.find(":")));
+            command3 = command3.substr(command3.find(":") + 1);
+            int y = std::stoi(command3.substr(0, command3.find(":")));
+            command3 = command3.substr(command3.find(":") + 1);
+            int val = std::stoi(command3);
+            gridState.patterns[gridState.currentSelectedPattern].setNote(x, y, val, true);
+        }
+        else if (command2 == "setNoteVelocity_") {
+            int x = std::stoi(command3.substr(0, command3.find(":")));
+            command3 = command3.substr(command3.find(":") + 1);
+            int y = std::stoi(command3.substr(0, command3.find(":")));
+            command3 = command3.substr(command3.find(":") + 1);
+            int val = std::stoi(command3);
+            gridState.patterns[gridState.currentSelectedPattern].setVelocity(x,y,val,true);
+        }
+        else if (command2 == "setNoteLength_ms") {
+            int x = std::stoi(command3.substr(0, command3.find(":")));
+            command3 = command3.substr(command3.find(":") + 1);
+            int y = std::stoi(command3.substr(0, command3.find(":")));
+            command3 = command3.substr(command3.find(":") + 1);
+            int val = std::stoi(command3);
+            gridState.patterns[gridState.currentSelectedPattern].setNoteLength(x,y,val,true);
+        }
+        else if (command2 == "setNoteLenFrctnl") {
+            //std::cout << "command3: " << command3 << std::endl;
+            int x = std::stoi(command3.substr(0, command3.find(":")));
+            command3 = command3.substr(command3.find(":") + 1);
+            int y = std::stoi(command3.substr(0, command3.find(":")));
+            command3 = command3.substr(command3.find(":") + 1);
+            int xf = std::stoi(command3.substr(0, command3.find(":")));
+            command3 = command3.substr(command3.find(":") + 1);
+            int yf = std::stoi(command3);
+            gridState.patterns[gridState.currentSelectedPattern].setNoteLength(x,y,xf,yf,true);
+            
+            //std::cout << "x: " << x << std::endl;
+            //std::cout << "y: " << y << std::endl;
+            //std::cout << "xf: " << xf << std::endl;
+            //std::cout << "yf: " << yf << std::endl;
+        }
+        else if (command2 == "patternOptions__") {
+            int chan = std::stoi(command3.substr(0, command3.find(":")));
+            command3 = command3.substr(command3.find(":") + 1);
+            int mode = std::stoi(command3.substr(0, command3.find(":")));
+            command3 = command3.substr(command3.find(":") + 1);
+            int xSteps = std::stoi(command3.substr(0, command3.find(":")));
+            command3 = command3.substr(command3.find(":") + 1);
+            int ySteps = std::stoi(command3.substr(0, command3.find(":")));
+            command3 = command3.substr(command3.find(":") + 1);
+            int xStepSize = std::stoi(command3.substr(0, command3.find(":")));
+            command3 = command3.substr(command3.find(":") + 1);
+            int yStepSize = std::stoi(command3);
+            gridState.patterns[gridState.currentSelectedPattern].setNumStepsAndSizes(xSteps, ySteps, xStepSize, yStepSize);
+            if (chan < 16 && chan >= 0) {
+                gridState.patterns[gridState.currentSelectedPattern].setOutPort(gridState.patterns[gridState.currentSelectedPattern].getOutPort().portIndex, chan);
+            }
+            std::cout << "mode: " << mode << std::endl;
+            gridState.patterns[gridState.currentSelectedPattern].setMode(mode);
+        }
+        else if (command2 == "patternMidiDev__") {
+            for (int i = 0; i < numMidiOutDevs; i++) {
+                if (midiOutPortNames[i].find(command3) != std::string::npos) {
+                     gridState.patterns[gridState.currentSelectedPattern].setOutPort(i, gridState.patterns[gridState.currentSelectedPattern].getOutPort().channel);
+                }
+            }
+        }
+        else {
+#ifdef DEBUG_EN
+            std::cout << "data command not recognised" << std::endl;
+#endif
+        }
+    }
+    else {
+#ifdef DEBUG_EN
+        std::cout << "command was not valid" << std::endl;
+#endif
+    }
+#ifdef DEBUG_EN1
+    time_t after = dateNowMicros();
+    std::cout << "time: " << after - before << std::endl;
+#endif // DEBUG_EN
+    ///////////////////////////////////////////////////////////////
     // Check the outgoing message to make sure it's not too long for the buffer.
-    if (FAILED(StringCchCopy(pchReply, BUFSIZE, reply)))
+    if (FAILED(StringCchCopy(pchReply, BUFSIZE, std::wstring(reply.begin(),reply.end()).c_str())))
     {
         *pchBytes = 0;
         pchReply[0] = 0;
@@ -811,7 +1253,7 @@ VOID GetAnswerToRequest(LPTSTR pchRequest, LPTSTR pchReply, LPDWORD pchBytes)
 
 time_t gridButtonDownTime[64];
 time_t gridButtonUpTime[64];
-int gridButtonsPressed[10] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+int gridButtonsPressed[10] = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
 int gridButtonsPressedIterator = 0;
 int lastPressedGridButton[2] = { 0, 0 };
 int tempVelocity = 0;
@@ -819,6 +1261,7 @@ int tempNote = 0;
 int tempOctave = 5;
 int tempnoteLength[2] = { 0, 0 };
 time_t playButtonDownTime = dateNowMillis();
+int lastPressedPlayButton[2] = { 0, 0 };
 
 void gridMidiInCB(double deltatime, std::vector< unsigned char >* message, void* /*userData*/)
 {
@@ -856,31 +1299,45 @@ void gridMidiInCB(double deltatime, std::vector< unsigned char >* message, void*
         }
         case 89: {
             // top play button
+            lastPressedPlayButton[1] = lastPressedPlayButton[0];
+            lastPressedPlayButton[0] = 89;
             patternNum = 0;
             break;
         }
         case 79: {
             // second play button
+            lastPressedPlayButton[1] = lastPressedPlayButton[0];
+            lastPressedPlayButton[0] = 79;
             patternNum = 1;
             break;
         }
         case 69: {
+            lastPressedPlayButton[1] = lastPressedPlayButton[0];
+            lastPressedPlayButton[0] = 69;
             patternNum = 2;
             break;
         }
         case 59: {
+            lastPressedPlayButton[1] = lastPressedPlayButton[0];
+            lastPressedPlayButton[0] = 59;
             patternNum = 3;
             break;
         }
         case 49: {
+            lastPressedPlayButton[1] = lastPressedPlayButton[0];
+            lastPressedPlayButton[0] = 49;
             patternNum = 4;
             break;
         }
         case 39: {
+            lastPressedPlayButton[1] = lastPressedPlayButton[0];
+            lastPressedPlayButton[0] = 39;
             patternNum = 5;
             break;
         }
         case 29: {
+            lastPressedPlayButton[1] = lastPressedPlayButton[0];
+            lastPressedPlayButton[0] = 29;
             // bottom play button
             patternNum = 6;
             break;
@@ -927,24 +1384,56 @@ void gridMidiInCB(double deltatime, std::vector< unsigned char >* message, void*
             }
             else {
                 // toggle playing state for pattern
-                gridState.patterns[patternNum].playing = !gridState.patterns[patternNum].playing;
+                if (gridState.playing) {
+                    switch (gridState.patterns[patternNum].playStartType) {
+                    case PLAYSTART_TYPE_IMMEDIATE: {
+                        gridState.patterns[patternNum].playing = !gridState.patterns[patternNum].playing;
 
-                // set overall play state to true
-                if (gridState.patterns[patternNum].playing) gridState.playing = true;
-                // if pattern was toggled off, reset tick and reduce number of playing patterns
-                if (!gridState.patterns[patternNum].playing) {
-                    gridState.patterns[patternNum].tickReset();
-                    gridState.numberOfPlayingPatterns--;
+                        // set overall play state to true
+                        if (gridState.patterns[patternNum].playing) gridState.playing = true;
+                        // if pattern was toggled off, reset tick and reduce number of playing patterns
+                        if (!gridState.patterns[patternNum].playing) {
+                            gridState.patterns[patternNum].tickReset();
+                            gridState.numberOfPlayingPatterns--;
+                        }
+                        else {
+                            // increase number of playing patterns
+                            gridState.numberOfPlayingPatterns++;
+                        }
+                        break;
+                    }
+                    case PLAYSTART_TYPE_NEXTBEAT: {
+                        //@TODO
+                        break;
+                    }
+                    case PLAYSTART_TYPE_NEXTBAR: {
+                        //@TODO
+                        break;
+                    }
+                    }
                 }
                 else {
-                    // increase number of playing patterns
-                    gridState.numberOfPlayingPatterns++;
+
+
+                    gridState.patterns[patternNum].playing = !gridState.patterns[patternNum].playing;
+
+                    // set overall play state to true
+                    if (gridState.patterns[patternNum].playing) gridState.playing = true;
+                    // if pattern was toggled off, reset tick and reduce number of playing patterns
+                    if (!gridState.patterns[patternNum].playing) {
+                        gridState.patterns[patternNum].tickReset();
+                        gridState.numberOfPlayingPatterns--;
+                    }
+                    else {
+                        // increase number of playing patterns
+                        gridState.numberOfPlayingPatterns++;
+                    }
                 }
             }
         }
 
         // ensure that the grid gets updated any time the selected pattern changes. 
-        copyCurrentPatternGridEnabledToGridColor();
+        //copyCurrentPatternGridEnabledToGridColor();
 
         if (gridState.numberOfPlayingPatterns == 0) {
             gridState.playing = false;
@@ -954,8 +1443,8 @@ void gridMidiInCB(double deltatime, std::vector< unsigned char >* message, void*
     if ((int)message->at(0) == 176 && (int)message->at(2) == 0 && (int)message->at(1) < 90 && (int)message->at(1) > 20) {
         time_t playButtonUpTime = dateNowMillis();
         if (playButtonUpTime - playButtonDownTime > 1000) {
-            gridState.gridMode = "patternOpts1";
-            sendScrollTextToLP(gridMidiOut, "X steps",127,127,127,15);
+            //gridState.gridMode = "patternOpts1";
+            //sendScrollTextToLP(gridMidiOut, "X steps",127,127,127,15);
         }
     }
 
@@ -964,7 +1453,7 @@ void gridMidiInCB(double deltatime, std::vector< unsigned char >* message, void*
         if ((int)message->at(0) == 144 && (int)message->at(2) == 127) { // grid button
             gridButtonDownTime[gridX + (8 * gridY)] = dateNowMillis();
             gridState.patterns[gridState.currentSelectedPattern].toggleButton(gridX, gridY);
-            copyCurrentPatternGridEnabledToGridColor();
+            //copyCurrentPatternGridEnabledToGridColor();
             for (int i = 0; i < 9; i++) {
                 gridButtonsPressed[i] = gridButtonsPressed[i + 1];
             }
@@ -978,14 +1467,12 @@ void gridMidiInCB(double deltatime, std::vector< unsigned char >* message, void*
             int* el = std::find_if(std::begin(gridButtonsPressed), std::end(gridButtonsPressed), [=](int el) {return el == (int)message->at(1); });
             if (el != std::end(gridButtonsPressed)) {
                 pressedArrayIndex = std::distance(gridButtonsPressed, el);
-                //std::cout << "pressed array index: " << pressedArrayIndex << std::endl;
             }
 
             int numberOfPressedButtons = 0;
             el = std::find_if(std::begin(gridButtonsPressed), std::end(gridButtonsPressed), [=](int el) {return el > 0; });
             if (el != std::end(gridButtonsPressed)) {
                 numberOfPressedButtons = 10 - std::distance(gridButtonsPressed, el);
-                //std::cout << "numberOfPressedButtons: " << numberOfPressedButtons << std::endl;
             }
              
             for (int i = pressedArrayIndex; i < 9; i++) {
@@ -997,7 +1484,6 @@ void gridMidiInCB(double deltatime, std::vector< unsigned char >* message, void*
             if (numberOfPressedButtons == 1) {
                 // check time this button was pressed
                 time_t timePressed = gridButtonUpTime[gridX + (8 * gridY)] - gridButtonDownTime[gridX + (8 * gridY)];
-                // console.log({timePressed});
                 //check for long press
                 if (timePressed > 1000) {
                     //enter gridNote options mode
@@ -1077,7 +1563,7 @@ void gridMidiInCB(double deltatime, std::vector< unsigned char >* message, void*
                 gridState.gridMode = "normal";
                 gridState.patterns[gridState.currentSelectedPattern].setVelocity(lastPressedGridButton[0], lastPressedGridButton[1], tempVelocity);
                 gridState.patterns[gridState.currentSelectedPattern].setNote(lastPressedGridButton[0], lastPressedGridButton[1], tempNote);
-                gridState.patterns[gridState.currentSelectedPattern].setNoteLength(lastPressedGridButton[0], lastPressedGridButton[1], calculateNoteLength(tempnoteLength[0], tempnoteLength[1], gridState.bpm));
+                gridState.patterns[gridState.currentSelectedPattern].setNoteLength(lastPressedGridButton[0], lastPressedGridButton[1], calculateNoteLength(tempnoteLength[0], tempnoteLength[1]));
                 clearGrid();
                 copyCurrentPatternGridEnabledToGridColor();
             }
@@ -1114,17 +1600,18 @@ void gridMidiInCB(double deltatime, std::vector< unsigned char >* message, void*
         }
         else if ((int)message->at(0) == 144 && (int)message->at(2) == 0) {
             if (gridY == 1) {
-                // @todo play note
                 int naturalNoteOffsets[8] = { 0, 2, 4, 5, 7, 9, 11, 12 };
-                tempNote = naturalNoteOffsets[gridX] + (tempOctave * 12);
-                // console.log({tempNote})
+                if (gridX < 8) {
+                    tempNote = naturalNoteOffsets[gridX] + (tempOctave * 12);
+                }
                 playNoteGlobal(gridState.patterns[gridState.currentSelectedPattern].getOutPort().portIndex, gridState.patterns[gridState.currentSelectedPattern].getOutPort().channel, tempNote, 0, -1);
             }
             else if (gridY == 2) {
                 int sharpFlatNoteOffsets[8] = { 0, 1, 3, 3, 6, 8, 10, 12 };
-                tempNote = sharpFlatNoteOffsets[gridX] + (tempOctave * 12);
+                if (gridX < 8) {
+                    tempNote = sharpFlatNoteOffsets[gridX] + (tempOctave * 12);
+                }
                 playNoteGlobal(gridState.patterns[gridState.currentSelectedPattern].getOutPort().portIndex, gridState.patterns[gridState.currentSelectedPattern].getOutPort().channel, tempNote, 0, -1);
-                // console.log({tempNote})
             }
             else if (gridY == 6) {
                 // tempnoteLength = gridX + 1;
@@ -1157,25 +1644,6 @@ void gridMidiInCB(double deltatime, std::vector< unsigned char >* message, void*
             }
         }
     }
-    
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 }
 
 /* sets the Launchpad to programmer mode */
@@ -1232,13 +1700,11 @@ void sendScrollTextToLP(RtMidiOut* rtmidiout, std::string textToSend, uint8_t re
 }
 
 time_t dateNowMillis() {
-    auto millis = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
-    return millis;
+    return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
 }
 
 time_t dateNowMicros() {
-    auto micros = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
-    return micros;
+    return std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
 }
 
 /* sends all of the grid colors to the LP */
@@ -1278,6 +1744,21 @@ time_t sendColors(time_t lastSentTime, RtMidiOut* rtmidiout, bool overrideThrott
         }
         message.push_back(247);
         rtmidiout->sendMessage(&message);
+        std::vector<unsigned char>mes;
+        mes.push_back(240);
+        mes.push_back(0);
+        mes.push_back(32);
+        mes.push_back(41);
+        mes.push_back(2);
+        mes.push_back(13);
+        mes.push_back(3);
+        mes.push_back(3);
+        mes.push_back(99);
+        mes.push_back(gridState.logoColor.r);
+        mes.push_back(gridState.logoColor.g);
+        mes.push_back(gridState.logoColor.b);
+        mes.push_back(247);
+        rtmidiout->sendMessage(&mes);
         return currentTime;
     }
     else {
@@ -1367,20 +1848,20 @@ void playNoteGlobal(int portI, int chan, int note, int vel, int len) {
     }       
 }
 
-int calculateNoteLength(int noteLengthIndex_x, int noteLengthIndex_y, int bpm) {
+int calculateNoteLength(int noteLengthIndex_x, int noteLengthIndex_y) {
 
-    float noteLengthArray[8][8] = {
-        {1 / 24, 2 / 24, 3 / 24, 4 / 24, 5 / 24, 6 / 24, 7 / 24, 8 / 24}, // sixteenth triplets
-        {1 / 16, 2 / 16, 3 / 16, 4 / 16, 5 / 16, 6 / 16, 7 / 16, 8 / 16}, // sixteenths
-        {1 / 12, 2 / 12, 3 / 12, 4 / 12, 5 / 12, 6 / 12, 7 / 12, 8 / 12 }, // triplets
-        {1 / 8, 2 / 8, 3 / 8, 4 / 8, 5 / 8, 6 / 8, 7 / 8, 8 / 8}, // eigths
-        {1 / 6,  2 / 6,  3 / 6, 4 / 6, 5 / 6, 6 / 6, 7 / 6, 8 / 6}, // quater triplets
-        {1 / 4,  2 / 4,  3 / 4, 4 / 4, 5 / 4, 6 / 4, 7 / 4, 8 / 4}, // qarters
-        {1 / 3,  2 / 3,  3 / 3, 4 / 3, 5 / 3, 6 / 3, 7 / 3, 8 / 3}, // half note triplets
-        {1 / 2,  2 / 2,  3 / 2, 4 / 2, 5 / 2, 6 / 2, 7 / 2, 8 / 2} // half notes
+    double noteLengthArray[8][8] = {
+        {1.0 / 24, 2.0 / 24, 3.0 / 24, 4.0 / 24, 5.0 / 24, 6.0 / 24, 7.0 / 24, 8.0 / 24}, // sixteenth triplets
+        {1.0 / 16, 2.0 / 16, 3.0 / 16, 4.0 / 16, 5.0 / 16, 6.0 / 16, 7.0 / 16, 8.0 / 16}, // sixteenths
+        {1.0 / 12, 2.0 / 12, 3.0 / 12, 4.0 / 12, 5.0 / 12, 6.0 / 12, 7.0 / 12, 8.0 / 12 }, // triplets
+        {1.0 / 8, 2.0 / 8, 3.0 / 8, 4.0 / 8, 5.0 / 8, 6.0 / 8, 7.0 / 8, 8.0 / 8}, // eigths
+        {1.0 / 6,  2.0 / 6,  3.0 / 6, 4.0 / 6, 5.0 / 6, 6.0 / 6, 7.0 / 6, 8.0 / 6}, // quater triplets
+        {1.0 / 4,  2.0 / 4,  3.0 / 4, 4.0 / 4, 5.0 / 4, 6.0 / 4, 7.0 / 4, 8.0 / 4}, // qarters
+        {1.0 / 3,  2.0 / 3,  3.0 / 3, 4.0 / 3, 5.0 / 3, 6.0 / 3, 7.0 / 3, 8.0 / 3}, // half note triplets
+        {1.0 / 2,  2.0 / 2,  3.0 / 2, 4.0 / 2, 5.0 / 2, 6.0 / 2, 7.0 / 2, 8.0 / 2} // half notes
     };
-    float secondsPerMeasure = 60 / (float(bpm) / 4);
-    float noteTime = secondsPerMeasure * noteLengthArray[noteLengthIndex_x][noteLengthIndex_y];
+    double secondsPerMeasure = 60 / (double(gridState.bpm) / 4);
+    double noteTime = secondsPerMeasure * noteLengthArray[noteLengthIndex_x][noteLengthIndex_y];
     return int(noteTime * 1000);
 }
 
@@ -1441,5 +1922,74 @@ void drawGridNoteOpts() {
             gridState.gridColor[x][y].b = val;
             gridState.gridColor[x][y].g = val;
         }
+    }
+} 
+
+void updateMidiDevices() {
+    try {
+        numMidiInDevs = midiIn[127]->getPortCount();
+        if (numMidiInDevs > 128)std::cout << "Only able to handle first 128 midi input devices. " << std::endl;
+        std::string portName;
+        // go through all available midi devices and look for the LPminiMK3
+        for (uint16_t i = 0; i < (numMidiInDevs<128?numMidiInDevs:128); i++) {
+            portName = midiIn[i]->getPortName(i);
+            std::string LPminiMK3_name = "MIDIIN2 (LPMiniMK3 MIDI)";
+            int val = portName.compare(0, LPminiMK3_name.size(), LPminiMK3_name);
+            midiInPortNames[i] = portName;
+            if (val == 0) {
+                if (gridMidiInDevIndex == -1) {
+                    
+                    gridMidiIn->setCallback(&gridMidiInCB);
+                    gridMidiIn->openPort(i);
+                    // Don't ignore sysex, timing, or active sensing messages.
+                    gridMidiIn->ignoreTypes(true, true, true);
+                    gridMidiInDevIndex = i;
+                }
+            }
+            else {
+                if (midiInputDevicesEnabled[i] && !midiIn[i]->isPortOpen()) {
+                    midiIn[i]->openPort(i);
+                    midiIn[i]->ignoreTypes(false, false, false);
+                }
+                else if (!midiInputDevicesEnabled[i] && midiIn[i]->isPortOpen()) {
+                    midiIn[i]->closePort();
+                }
+            }
+        }
+    }
+    catch (RtMidiError& error) {
+        error.printMessage();
+    }
+    try {
+        numMidiOutDevs = midiOut[127]->getPortCount();
+        if (numMidiOutDevs > 128)std::cout << "Only able to handle first 128 midi output devices. " << std::endl;
+        std::string portName;
+        //go through all midi out devices and look for LPminiMK3
+        for (uint16_t i = 0; i < (numMidiOutDevs<128?numMidiOutDevs:128); i++) {
+            portName = midiOut[i]->getPortName(i);
+            
+            std::string LPminiMK3_name = "MIDIOUT2 (LPMiniMK3 MIDI)";
+            int val = portName.compare(0, LPminiMK3_name.size(), LPminiMK3_name);
+            midiOutPortNames[i] = portName;
+            if (val == 0) {
+                if (gridMidiOutDevIndex == -1) {
+                    gridMidiOut->openPort(i);
+                    gridMidiOutDevIndex = i;
+                    programState.launchPadInit = true;
+                }
+            }
+            else {
+                if (midiOutputDevicesEnabled[i] && !midiOut[i]->isPortOpen()) {
+                    midiOut[i]->openPort(i);
+                }
+                else if (!midiOutputDevicesEnabled[i] && midiOut[i]->isPortOpen()) {
+                    midiOut[i]->closePort();
+                }
+            }
+            //std::cout << portName << std::endl;
+        }
+    }
+    catch (RtMidiError& error) {
+        error.printMessage();
     }
 }

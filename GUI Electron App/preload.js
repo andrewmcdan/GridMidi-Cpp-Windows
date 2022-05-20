@@ -1,10 +1,11 @@
+const { contextBridge, ipcRenderer } = require('electron')
+
 window.addEventListener('DOMContentLoaded', () => {
-    const replaceText = (selector, text) => {
-      const element = document.getElementById(selector)
-      if (element) element.innerText = text
-    }
-  
-    for (const dependency of ['chrome', 'node', 'electron']) {
-      replaceText(`${dependency}-version`, process.versions[dependency])
-    }
-  })
+
+})
+
+contextBridge.exposeInMainWorld('gridMidiAPI',{
+    testFn: () => {console.log("this is a test");},
+    getStatusOfController:() => ipcRenderer.invoke('getStatusOfControllerFn'),
+    sendMessageToController:(...args) => ipcRenderer.invoke('sendMessageToControllerFn',...args)
+})

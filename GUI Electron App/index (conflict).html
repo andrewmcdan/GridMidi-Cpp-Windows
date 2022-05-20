@@ -36,7 +36,7 @@
                 </div>
                 <div id="kbInputSelectorDropdownContainer" class="">
                     <select id="kbInputSelectDropdown">
-                        <option selected disable hidden>-- Please select an option --</option>
+                        <option>--Please Select an Option test test tes test--</option>
                     </select>
                 </div>
             </div>
@@ -46,7 +46,7 @@
                 </div>
                 <div id="drumsModeOutputDeviceSelectorDropdownContainer" class="">
                     <select id="drumsModeOutputDeviceSelectorDropdown">
-                        <option selected disable hidden>-- Please select an option --</option>
+
                     </select>
                 </div>
             </div>
@@ -56,7 +56,7 @@
                 </div>
                 <div id="keysModeOutputDeviceSelectorDropdownContainer" class="">
                     <Select id="keysModeOutputDeviceSelectorDropdown">
-                        <option selected disable hidden>-- Please select an option --</option>
+
                     </Select>
                 </div>
             </div>
@@ -77,6 +77,7 @@
                     </div>
                     <div id="noteValueDropdownContainer">
                         <select id="noteValueDropdown">
+
                         </select>
                     </div>
                 </div>
@@ -98,31 +99,17 @@
                 </div>
                 <div class="optionsContainerGridder" id="noteLength_fractionalContainer">
                     <div id="notelength_fractional_text">
-                        Length (fractional):<span><input type="checkbox" id="fractionalNoteLengthCheck"></span>
+                        Length (fractional):
                     </div>
                     <div id="noteLength_fractionalDropdownContainer">
                         <span>
                             <select id="noteLength_fractionalDropdown1">
-                                <option>1</option>
-                                <option>2</option>
-                                <option>3</option>
-                                <option>4</option>
-                                <option>5</option>
-                                <option>6</option>
-                                <option>7</option>
-                                <option>8</option>
+
                             </select>
                         </span>
                         <span>
                             <select id="noteLength_fractionalDropdown2">
-                                <option value = "0">Sixteenth Triplets</option>
-                                <option value = "1">Sixteenths</option>
-                                <option value = "2">Triplets</option>
-                                <option value = "3">Eighths</option>
-                                <option value = "4">Quarter Triplets</option>
-                                <option value = "5">Quarters</option>
-                                <option value = "6">Half note triplets</option>
-                                <option value = "7">Half Notes</option>
+
                             </select>
                         </span>
                     </div>
@@ -143,7 +130,7 @@
                     </div>
                     <div id="patternMidiOutDeviceDropdownContainer">
                         <select id="patternMidiOutDeviceDropdown">
-                            <option>-- Please select an option --</option>
+
                         </select>
                     </div>
                 </div>
@@ -153,22 +140,7 @@
                     </div>
                     <div id="patternOutputChannelDropdownContainer">
                         <select id="patternOutputChannelDropdown">
-                            <option>1</option>
-                            <option>2</option>
-                            <option>3</option>
-                            <option>4</option>
-                            <option>5</option>
-                            <option>6</option>
-                            <option>7</option>
-                            <option>8</option>
-                            <option>9</option>
-                            <option>10</option>
-                            <option>11</option>
-                            <option>12</option>
-                            <option>13</option>
-                            <option>14</option>
-                            <option>15</option>
-                            <option>16</option>
+
                         </select>
                     </div>
                 </div>
@@ -178,8 +150,7 @@
                     </div>
                     <div id="patternModeDropdownContainer">
                         <select id="patternModeDropdown">
-                            <option value="0">X / Y - Logical OR</option>
-                            <option value="1">X / Y - Logical AND</option>
+
                         </select>
                     </div>
                 </div>
@@ -217,33 +188,10 @@
                 </div>
             </div>
         </div>
-        <div>
-            
-        </div>
-        <div id="configContainer">
-            <div id="midiConfigContainer" class="border1px padding25px">
-                <div id="midiDeviceListContainer">
-                    <div id="midiInputDeviceListContainer" class="midiDeviceListContainer">
-                        <div>
-                            Config Midi Input Devices:
-                        </div>
-                        <div id="midiInputDeviceList">
-
-                        </div>
-                    </div>
-                    <hr>
-                    <div id="midiOutputDeviceListContainer" class="midiDeviceListContainer">
-                        <div>
-                            Config Midi Output Devices:
-                        </div>
-                        <div id="midiOutputDeviceList">
-
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
     </div>
+    
+    <button type="button" id="btn2">do a thing</button>
+    thing result: <strong id="thingResult"></strong>
 </body>
 <script src="./renderer.js"></script>
 
