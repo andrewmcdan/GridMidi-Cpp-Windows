@@ -19,6 +19,24 @@ const { exec } = require('child_process')
 //   console.log(`stdout:\n${stdout}`);
 // });
 
+async function handleFileOpen(){
+    const {canceled, filePaths} = await dialog.showOpenDialog()
+    if(canceled){
+        return
+    }else{
+        return filePaths[0]
+    }
+}
+
+async function handleFileSave(){
+    const {canceled, filePath} = await dialog.showSaveDialog()
+    if(canceled){
+        return
+    }else{
+        return filePath
+    }
+}
+
 async function handleMyCustomFn(env,...args){
     // console.log("in my custom Fn");
     // console.log({args});
@@ -71,6 +89,8 @@ app.whenReady().then(() => {
     ipcMain.handle('myCustomFn', handleMyCustomFn)
     ipcMain.handle('getStatusOfControllerFn', handleGetStatusOfController)
     ipcMain.handle('sendMessageToControllerFn', handleSendMessageToController)
+    ipcMain.handle('dialog:openFile', handleFileOpen)
+    ipcMain.handle('dialog:saveFile', handleFileSave)
     createWindow()
 
     app.on('activate', () => {
@@ -90,15 +110,15 @@ app.on('window-all-closed', () => {
 // In this file you can include the rest of your app's specific main process
 // code. You can also put them in separate files and require them here.
 
-
+/*
 let response = 0;
 if (controller.IsPipeReady()) {
     response = controller.PipeMessage("reqnumMidiDevs_____")
 } else {
     console.log("Pipe Not Ready.");
 }
-console.log("response");
-console.log(response);
+// console.log("response");
+// console.log(response);
 
 
 if (controller.IsPipeReady()) {
@@ -106,16 +126,16 @@ if (controller.IsPipeReady()) {
 } else {
     console.log("Pipe Not Ready.");
 }
-console.log("response");
-console.log(response);
+// console.log("response");
+// console.log(response);
 
 if (controller.IsPipeReady()) {
     response = controller.PipeMessage("reqmidiOutDevNames_")
 } else {
     console.log("Pipe Not Ready.");
 }
-console.log("response");
-console.log(response);
+// console.log("response");
+// console.log(response);
 
 
 if (controller.IsPipeReady()) {
@@ -123,8 +143,8 @@ if (controller.IsPipeReady()) {
 } else {
     console.log("Pipe Not Ready.");
 }
-console.log("response");
-console.log(response);
+// console.log("response");
+// console.log(response);
 
 
 if (controller.IsPipeReady()) {
@@ -132,16 +152,17 @@ if (controller.IsPipeReady()) {
 } else {
     console.log("Pipe Not Ready.");
 }
-console.log("response");
-console.log(response);
+// console.log("response");
+// console.log(response);
 
 if (controller.IsPipeReady()) {
     response = controller.PipeMessage("reqgetMidiDevOutEn_")
 } else {
     console.log("Pipe Not Ready.");
 }
-console.log("response");
-console.log(response);
+// console.log("response");
+// console.log(response);
+*/
 
 /**
  * Need to add logic to detect if the controller app is running so that it isn't started twice.

@@ -215,10 +215,23 @@
                         <input id="yStepSizeNum_box" name="yStepSizeNum_box" type="number" step="1" min="1" max="384" value="24">
                     </div>
                 </div>
+                <div class="optionsContainerGridder" id="startTypeConatiner">
+                    <div id="startTypeText">
+                        Pattern Start Type
+                    </div>
+                    <div id="startTypeTextInputContainer">
+                        <select id="startTypeDropdown">
+                            <option value="0">Immediate</option>
+                            <option value="1">Next Beat</option>
+                            <option value="2">Next Bar</option>
+                        </select>
+                    </div>
+                </div>
             </div>
         </div>
-        <div>
-            
+        <div id="loadSaveContainer" class="border1px padding25px">
+            <span><input class="loadSaveButton" id="saveButton" type="button" value="save"></span>
+            <span><input class="loadSaveButton" id="loadButton" type="button" value="load"></span>
         </div>
         <div id="configContainer">
             <div id="midiConfigContainer" class="border1px padding25px">

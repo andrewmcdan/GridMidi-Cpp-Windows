@@ -52,6 +52,9 @@ const yStepSizeNum_boxEl = document.getElementById('yStepSizeNum_box')
 const midiInputDeviceListEl = document.getElementById('midiInputDeviceList')
 const midiOutputDeviceListEl = document.getElementById('midiOutputDeviceList')
 const fractionalNoteLengthCheckEl = document.getElementById('fractionalNoteLengthCheck')
+const startTypeDropdownEl = document.getElementById('startTypeDropdown')
+const saveButtonEl = document.getElementById('saveButton')
+const loadButtonEl = document.getElementById('loadButton')
 var getPatternOpts
 
 // Semitones from C to C D E F G A B
@@ -108,7 +111,7 @@ async function getDataFromController() {
         let searchIterator = res.search(";")
         let iterator = 0;
         while (1) {
-            res1 = res.substr(0, searchIterator - 2)
+            res1 = res.substr(0, searchIterator)
             gridMidi.midiDevices.input[iterator++] = res1
             res = res.substr(searchIterator + 2)
             searchIterator = res.search(";")
@@ -123,7 +126,7 @@ async function getDataFromController() {
         searchIterator = res.search(";")
         iterator = 0;
         while (1) {
-            res1 = res.substr(0, searchIterator - 2)
+            res1 = res.substr(0, searchIterator)
             gridMidi.midiDevices.output[iterator++] = res1
             res = res.substr(searchIterator + 2)
             searchIterator = res.search(";")
@@ -187,21 +190,18 @@ async function getDataFromController() {
         });
 
         kbInputSelectDropdownEl.addEventListener('change', () => {
-            // console.log(kbInputSelectDropdownEl.value);
             if (kbInputSelectDropdownEl.value != "-- Please select an option --") {
                 window.gridMidiAPI.sendMessageToController("datsetKbInputDev___" + kbInputSelectDropdownEl.value)
             }
         })
 
         drumsModeOutputDeviceSelectorDropdownEl.addEventListener('change', () => {
-            // console.log(drumsModeOutputDeviceSelectorDropdownEl.value);
             if (drumsModeOutputDeviceSelectorDropdownEl.value != "-- Please select an option --") {
                 window.gridMidiAPI.sendMessageToController("datsetDrumOutputDev" + drumsModeOutputDeviceSelectorDropdownEl.value)
             }
         })
 
         keysModeOutputDeviceSelectorDropdownEl.addEventListener('change', () => {
-            // console.log(keysModeOutputDeviceSelectorDropdownEl.value);
             if (keysModeOutputDeviceSelectorDropdownEl.value != "-- Please select an option --") {
                 window.gridMidiAPI.sendMessageToController("datsetKeysOutputDev" + keysModeOutputDeviceSelectorDropdownEl.value)
             }
@@ -210,7 +210,7 @@ async function getDataFromController() {
         res = await window.gridMidiAPI.sendMessageToController("reqgetKbMidiInDev__")
         let opts = kbInputSelectDropdownEl.children
         for (let i = 0; i < opts.length; i++) {
-            if (opts[i].innerText == res.substr(0, res.length - 2)) {
+            if (opts[i].innerText == res.substr(0, res.length)) {
                 opts[i].selected = true
             }
         }
@@ -218,7 +218,7 @@ async function getDataFromController() {
         res = await window.gridMidiAPI.sendMessageToController("reqgetDrumsModeODev")
         opts = drumsModeOutputDeviceSelectorDropdownEl.children
         for (let i = 0; i < opts.length; i++) {
-            if (opts[i].innerText == res.substr(0, res.length - 2)) {
+            if (opts[i].innerText == res.substr(0, res.length)) {
                 opts[i].selected = true
             }
         }
@@ -226,7 +226,7 @@ async function getDataFromController() {
         res = await window.gridMidiAPI.sendMessageToController("reqgetKeysModeODev_")
         opts = keysModeOutputDeviceSelectorDropdownEl.children
         for (let i = 0; i < opts.length; i++) {
-            if (opts[i].innerText == res.substr(0, res.length - 2)) {
+            if (opts[i].innerText == res.substr(0, res.length)) {
                 opts[i].selected = true
             }
         }
@@ -312,11 +312,7 @@ async function getDataFromController() {
         });
 
         res = await window.gridMidiAPI.sendMessageToController('reqPatternOutPort__')
-        console.log({res});
-        res = res.substr(0,res.length - 2)
-        console.log({res});
         patternMidiOutDeviceDropdownEl.value = res
-
         gridMidi.midiDevices.midiDevsLoaded = true
     }
     res = await window.gridMidiAPI.sendMessageToController("reqgetCurrentGridXY")
@@ -347,6 +343,7 @@ async function getDataFromController() {
 
 patternModeDropdownEl.addEventListener('change', () => {
     console.log(patternModeDropdownEl.value);
+    // TODO
 })
 
 for (let i = 0; i < 128; i++) {
@@ -395,10 +392,25 @@ yStepSizeNum_boxEl.addEventListener('input',sendPatternOpts)
 xStepSizeNum_boxEl.addEventListener('input',sendPatternOpts)
 patternModeDropdownEl.addEventListener('input',sendPatternOpts)
 patternOutputChannelDropdownEl.addEventListener('input',sendPatternOpts)
+startTypeDropdownEl.addEventListener('input',sendPatternOpts)
 patternMidiOutDeviceDropdownEl.addEventListener('input',(event)=>{
     window.gridMidiAPI.sendMessageToController('datpatternMidiDev__' + event.target.value)
 })
 
+loadButtonEl.addEventListener('click',async () => {
+    const filePath = await window.gridMidiAPI.openFile()
+    //console.log(filePath);
+    window.gridMidiAPI.sendMessageToController('datLoadFile________' + filePath)
+    getPatternOpts();
+})
+
+saveButtonEl.addEventListener('click',async () => {
+    filePath = await window.gridMidiAPI.saveFile()
+    // console.log(filePath);
+    if(filePath.substring(filePath.length-4) != ".dat") filePath+=".dat"
+    window.gridMidiAPI.sendMessageToController('datSaveFile________' + filePath)
+    // console.log(filePath);
+})
 
 
 setInterval(async () => {
@@ -425,9 +437,12 @@ setInterval(async () => {
     res = res.substring(res.indexOf(":") + 1)
     xStepSizeNum_boxEl.value = Number(res.substring(0, res.indexOf(":")))
     res = res.substring(res.indexOf(":") + 1)
-    yStepSizeNum_boxEl.value = Number(res.substring(0))
+    yStepSizeNum_boxEl.value = Number(res.substring(0, res.indexOf(":")))
+    res = res.substring(res.indexOf(":") + 1)
+    startTypeDropdownEl.value = Number(res)
     res = await window.gridMidiAPI.sendMessageToController('reqPatternOutPort__')
-    res = res.substr(0,res.length - 2)
+    res = res.substr(0)
+    console.log({res});
     patternMidiOutDeviceDropdownEl.value = res
 })()
 
@@ -444,6 +459,8 @@ function sendPatternOpts(){
     mes += String(xStepSizeNum_boxEl.value)
     mes += ":"
     mes += String(yStepSizeNum_boxEl.value)
+    mes += ":"
+    mes += String(startTypeDropdownEl.value)
     window.gridMidiAPI.sendMessageToController(mes)
 }
 function fromMidi(midi) {

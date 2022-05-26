@@ -1,0 +1,20 @@
+midiInDevs;
+0:StreamDeck2Daw 0
+0:Daw2StreamDeck 1
+0:LPMiniMK3 MIDI 2
+0:MIDIIN2 (LPMiniMK3 MIDI) 3
+0:TouchOSC Bridge 4
+1:AudioBox USB 5
+1:Q49 6
+midiOutDevs;
+0:0:Microsoft GS Wavetable Synth 0
+1:0:StreamDeck2Daw 1
+1:1:Daw2StreamDeck 2
+0:0:LPMiniMK3 MIDI 3
+0:0:MIDIOUT2 (LPMiniMK3 MIDI) 4
+0:0:TouchOSC Bridge 5
+0:0:AudioBox USB 6
+0:0:Q49 7
+KBinDev:disabled
+DrumsDev:disabled
+KeysDev:disabled

@@ -41,6 +41,9 @@
   \file RtMidi.h
  */
 
+//#define RTMIDI_DO_NOT_ENSURE_UNIQUE_PORTNAMES
+//#define __RTMIDI_DEBUG__
+
 #ifndef RTMIDI_H
 #define RTMIDI_H
 

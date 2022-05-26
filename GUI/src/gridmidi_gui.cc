@@ -1,3 +1,5 @@
+// to compile:  run "node-gyp build" in folder one level up from this file
+
 #ifndef UNICODE
 #define UNICODE
 #endif
@@ -14,20 +16,35 @@
 #include <iostream>
 #define BUFSIZE 8192
 
+bool clearConsole(HANDLE);
+bool setConsoleTextColor(HANDLE, uint8_t, uint8_t, uint8_t);
+void returnConsoleToOriginal(HANDLE, DWORD);
+bool deleteConsoleLines(HANDLE, int);
+bool setConsoleWindowTitle(HANDLE, std::string);
+
 Napi::Value PipeMessage( const Napi::CallbackInfo& info){
-    std::cout << "********** Entering cpp module code. fn(PipeMessage) *************" << std::endl << std::endl;
     Napi::Env env = info.Env();
 
+    HANDLE hStdOut = GetStdHandle(STD_OUTPUT_HANDLE);
+    DWORD mode = 0;
+    if(!GetConsoleMode(hStdOut, &mode)) return Napi::Number::New(env,-20 + GetLastError());
+    const DWORD originalMode = mode;
+    mode |= ENABLE_VIRTUAL_TERMINAL_PROCESSING;
+
+    
+
+    if(!SetConsoleMode(hStdOut, mode)) return Napi::Number::New(env,-30 + GetLastError());
+    if(!setConsoleWindowTitle(hStdOut, "Grid MIDI - Electron GUI")) return Napi::Number::New(env,-60 + GetLastError());
+    if(!setConsoleTextColor(hStdOut,255,200,200)) return Napi::Number::New(env,-40 + GetLastError());
+    if(!deleteConsoleLines(hStdOut,6)) return Napi::Number::New(env,-50 + GetLastError());
+    // std::cout << "********** Entering cpp module code. fn(PipeMessage) *************" << std::endl;
+    
     // Get the first paramter passed to the function from the originating JS. It should be a string.
     // Convert it to s std::string.
     std::string aString = info[0].ToString().Utf8Value().c_str();
-
-    std::cout << "astring: " << aString << std::endl;
     
     // Create a LPCTSTR
     LPCTSTR lpvMessage = std::wstring(aString.begin(),aString.end()).c_str();
-
-    _tprintf(TEXT("lpvMessage: %s\n"), lpvMessage);
 
     HANDLE hPipe;
     TCHAR  chBuf[BUFSIZE];
@@ -36,7 +53,6 @@ Napi::Value PipeMessage( const Napi::CallbackInfo& info){
     LPTSTR lpszPipename = TEXT("\\\\.\\pipe\\gridMidi");
 
     // Try to open a named pipe; wait for it, if necessary. 
-
     while (1)
     {
         hPipe = CreateFileW(
@@ -58,15 +74,17 @@ Napi::Value PipeMessage( const Napi::CallbackInfo& info){
         if (GetLastError() != ERROR_PIPE_BUSY)
         {
             _tprintf(TEXT("Could not open pipe. GLE=%d\n"), GetLastError());
-            std::cout << "********** Exiting cpp module code. fn(PipeMessage) *************" << std::endl << std::endl;
+            // std::cout << "********** Exiting cpp module code. fn(PipeMessage) *************" << std::endl << std::endl;
+            returnConsoleToOriginal(hStdOut, originalMode);
             return Napi::Number::New(env,-10 + GetLastError());
         }
 
-        // All pipe instances are busy, so wait for 20 seconds. 
-        if (!WaitNamedPipe(lpszPipename, 20000))
+        // All pipe instances are busy, so wait for 5 seconds. 
+        if (!WaitNamedPipe(lpszPipename, 5000))
         {
-            printf("Could not open pipe: 20 second wait timed out.");
-            std::cout << "********** Exiting cpp module code. fn(PipeMessage) *************" << std::endl << std::endl;
+            printf("Could not open pipe: 5 second wait timed out.");
+            // std::cout << "********** Exiting cpp module code. fn(PipeMessage) *************" << std::endl << std::endl;
+            returnConsoleToOriginal(hStdOut, originalMode);
             return Napi::Number::New(env,-2);
         }
     }
@@ -86,7 +104,8 @@ Napi::Value PipeMessage( const Napi::CallbackInfo& info){
     if (!fSuccess)
     {
         _tprintf(TEXT("SetNamedPipeHandleState failed. GLE=%d\n"), GetLastError());
-        std::cout << "********** Exiting cpp module code. fn(PipeMessage) *************" << std::endl << std::endl;
+        // std::cout << "********** Exiting cpp module code. fn(PipeMessage) *************" << std::endl << std::endl;
+        returnConsoleToOriginal(hStdOut, originalMode);
         return Napi::Number::New(env,-3);
     }
 
@@ -104,11 +123,12 @@ Napi::Value PipeMessage( const Napi::CallbackInfo& info){
     if (!fSuccess)
     {
         _tprintf(TEXT("WriteFile to pipe failed. GLE=%d\n"), GetLastError());
-        std::cout << "********** Exiting cpp module code. fn(PipeMessage) *************" << std::endl << std::endl;
+        // std::cout << "********** Exiting cpp module code. fn(PipeMessage) *************" << std::endl << std::endl;
+        returnConsoleToOriginal(hStdOut, originalMode);
         return Napi::Number::New(env,-4);
     }
 
-    printf("Message sent to server, receiving reply as follows:\n");
+    printf("Message sent. Reply: ");
 
     do
     {
@@ -130,21 +150,20 @@ Napi::Value PipeMessage( const Napi::CallbackInfo& info){
     if (!fSuccess)
     {
         _tprintf(TEXT("ReadFile from pipe failed. GLE=%d\n"), GetLastError());
-        std::cout << "********** Exiting cpp module code. fn(PipeMessage) *************" << std::endl;
+        // std::cout << "********** Exiting cpp module code. fn(PipeMessage) *************" << std::endl;
+        returnConsoleToOriginal(hStdOut, originalMode);
         return Napi::Number::New(env,-5);
     }
 
-    printf("<End of message>\n");
-    // _getch();
-
     CloseHandle(hPipe);
     std::wstring temp = std::wstring(chBuf);
-    std::cout << "********** Exiting cpp module code. fn(PipeMessage) *************" << std::endl;
+    // std::cout << "********** Exiting cpp module code. fn(PipeMessage) *************" << std::endl;
+    returnConsoleToOriginal(hStdOut, originalMode);
     return Napi::String::New(env,std::string(temp.begin(),temp.end()));
 }
 
 Napi::Value IsPipeReady( const Napi::CallbackInfo& info){
-    std::cout << "** Entering cpp module code. fn(IsPipeReady) **";
+    // std::cout << "** Entering cpp module code. fn(IsPipeReady) **";
     Napi::Env env = info.Env();
     HANDLE hPipe;
     LPCTSTR lpszPipename = TEXT("\\\\.\\pipe\\gridMidi");
@@ -170,12 +189,12 @@ Napi::Value IsPipeReady( const Napi::CallbackInfo& info){
         if (GetLastError() != ERROR_PIPE_BUSY)
         {
             //_tprintf(TEXT("Could not open pipe. GLE=%d\n"), GetLastError());
-            std::cout << "** Exiting cpp module code. fn(IsPipeReady) **" << std::endl;
+            // std::cout << "** Exiting cpp module code. fn(IsPipeReady) **" << std::endl;
             return Napi::Boolean::New(env,false);
         }
     }
     CloseHandle(hPipe);
-    std::cout << "** Exiting cpp module code. fn(IsPipeReady) **" << std::endl;
+    // std::cout << "** Exiting cpp module code. fn(IsPipeReady) **" << std::endl;
     return Napi::Boolean::New(env,true);
 }
 
@@ -186,3 +205,36 @@ Napi::Object Init(Napi::Env env, Napi::Object exports) {
 }
 
 NODE_API_MODULE(addon, Init)
+
+bool clearConsole(HANDLE hndl){
+    DWORD written = 0;
+    PCWSTR sequence = L"\x1b[2J";
+    return WriteConsoleW(hndl, sequence, (DWORD)wcslen(sequence), &written, NULL);
+}
+
+bool setConsoleTextColor(HANDLE hndl, uint8_t r, uint8_t g, uint8_t b){
+    DWORD written = 0;
+    std::string temp = "\x1b[38;2;" + std::to_string(r) + ";" + std::to_string(g) + ";" + std::to_string(b) + "m";
+    // LPCTSTR lpvMessage = std::wstring(aString.begin(),aString.end()).c_str();
+    PCWSTR sequence = std::wstring(temp.begin(),temp.end()).c_str();
+    return WriteConsoleW(hndl, sequence, (DWORD)wcslen(sequence), &written, NULL);
+}
+
+void returnConsoleToOriginal(HANDLE hndl, DWORD mode){
+    setConsoleTextColor(hndl,255,255,255);
+    SetConsoleMode(hndl, mode);
+}
+
+bool deleteConsoleLines(HANDLE hndl, int n){
+    DWORD written = 0;
+    std::string temp = "\x1b[" + std::to_string(n) + "M";
+    PCWSTR seq = std::wstring(temp.begin(),temp.end()).c_str();
+    return WriteConsoleW(hndl, seq, (DWORD)wcslen(seq), &written, NULL);
+}
+
+bool setConsoleWindowTitle(HANDLE hndl, std::string str){
+    DWORD written = 0;
+    std::string temp = "\x1b]0;" + str + "\x1b\x5c";
+    PCWSTR seq = std::wstring(temp.begin(),temp.end()).c_str();
+    return WriteConsoleW(hndl, seq, (DWORD)wcslen(seq), &written, NULL);
+}

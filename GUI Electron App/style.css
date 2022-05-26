@@ -104,3 +104,13 @@ select{
     background: gray; /* Green background */
     cursor: pointer; /* Cursor on hover */
   }
+
+  .loadSaveButton {
+    background-color: #8c8c8c;
+    border: none;
+    color: white;
+    padding: 16px 32px;
+    text-decoration: none;
+    margin: 4px 2px;
+    cursor: pointer;
+  }
