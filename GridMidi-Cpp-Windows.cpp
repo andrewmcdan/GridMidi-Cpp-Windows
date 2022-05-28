@@ -2,9 +2,7 @@
 
 /*
 * TODO:
-* - S̶e̶n̶d̶ m̶i̶d̶i̶ s̶t̶a̶r̶t̶/̶s̶t̶o̶p̶ m̶e̶s̶s̶a̶g̶e̶s̶ w̶h̶e̶n̶ t̶h̶e̶ p̶l̶a̶y̶ s̶t̶a̶t̶e̶ c̶h̶a̶n̶g̶e̶s̶.̶
-* - L̶o̶a̶d̶ /̶ s̶a̶v̶e̶ p̶r̶o̶j̶e̶c̶t̶
-* - L̶o̶a̶d̶ /̶ s̶a̶v̶e̶ s̶e̶t̶t̶i̶n̶g̶s̶
+* 
 */
 
 #include "GridMidi.h"
@@ -74,7 +72,6 @@ struct playingNote_t {
     int portIndex;
     int channel;
 };
-
 class gridPattern {
 public:
     // Set the callback functions for colring the play button
@@ -486,7 +483,6 @@ private:
     color_t color;
     patternModes mode = XY_OR;
 };
-
 struct gS_t {
     gS_t() {
         // Buttons across top
@@ -561,7 +557,6 @@ struct gS_t {
     bool playing = false;
     int mode = gridMode::normal;
 }gridState;
-
 struct keysMode_t {
     keysMode_t() {
         for (int i = 0; i < 8; i++)
@@ -685,7 +680,6 @@ struct keysMode_t {
     };
     int notes[8][8];
 }keysMode;
-
 struct xternKb_t {
     int inputDevIndex = -1;
     int lastNoteVal = -1;
@@ -1136,6 +1130,10 @@ VOID ProcessPipeMessage(LPTSTR pchRequest, LPTSTR pchReply, LPDWORD pchBytes)
         *pchBytes = (lstrlen(pchReply) + 1) * sizeof(TCHAR);
         return;
     }
+
+    //if (stdString_Request.substr(0, 4) == "kill")std::cout << "kill received\n";
+    if (stdString_Request == "")exit(0);
+
     std::string command1 = stdString_Request.substr(0, 3); // first 3 characters are either req or dat for request or data
     std::string command2 = stdString_Request.substr(3, 16); // Next 8 characters are sub commands
     std::string command3 = "";
@@ -1642,16 +1640,7 @@ void gridMidiInCB(double deltatime, std::vector< unsigned char >* message, void*
 
 /* sets the Launchpad to programmer mode */
 void setLPtoProgrammerMode() {
-    std::vector<unsigned char> message;
-    message.push_back(240);
-    message.push_back(0);
-    message.push_back(32);
-    message.push_back(41);
-    message.push_back(2);
-    message.push_back(13);
-    message.push_back(14);
-    message.push_back(1);
-    message.push_back(247);
+    std::vector<unsigned char> message {240,0,32,41,2,13,14,1,247};
     try {
         gridMidiOut->sendMessage(&message);
     }
@@ -1749,37 +1738,14 @@ int sendColors() {
 
 void copyCurrentPatternGridEnabledToGridColor() {
     if (gridState.mode != gridMode::normal)return;
-    for (int i = 0; i < 4; i++) {
-        gridState.otherColor[i].r = 10;
-        gridState.otherColor[i].g = 10;
-        gridState.otherColor[i].b = 10;
-    }
-    for (int i = 4; i < 8; i++) {
-        gridState.otherColor[i].r = 0;
-        gridState.otherColor[i].g = 0;
-        gridState.otherColor[i].b = 0;
-    }
-    gridState.otherColor[4].r = 127;
-    gridState.otherColor[4].g = 127;
-    gridState.otherColor[4].b = 127;
+    for (int i = 0; i < 4; i++) gridState.otherColor[i] = { 10, 10, 10 };
+    for (int i = 4; i < 8; i++) gridState.otherColor[i] = { 0, 0, 0 };
+    gridState.otherColor[4] = { 127,127,127 };
     for (int x = 0; x < 8; x++) {
         for (int y = 0; y < 8; y++) {
-            gridState.gridColor[x][y].r = 0;
-            gridState.gridColor[x][y].g = 0;
-            gridState.gridColor[x][y].b = 0;
-
-            if (gridState.patterns[gridState.currentSelectedPattern].getCurrentGridX() == x) {
-                gridState.gridColor[x][y].r = 50;
-                gridState.gridColor[x][y].g = 50;
-                gridState.gridColor[x][y].b = 50;
-            }
-
-            if (gridState.patterns[gridState.currentSelectedPattern].getCurrentGridY() == y) {
-                gridState.gridColor[x][y].r = 50;
-                gridState.gridColor[x][y].g = 50;
-                gridState.gridColor[x][y].b = 50;
-            }
-
+            gridState.gridColor[x][y] = { 0,0,0 };
+            if (gridState.patterns[gridState.currentSelectedPattern].getCurrentGridX() == x) gridState.gridColor[x][y] = { 50,50,50 };
+            if (gridState.patterns[gridState.currentSelectedPattern].getCurrentGridY() == y) gridState.gridColor[x][y] = { 50,50,50 };
             if (gridState.patterns[gridState.currentSelectedPattern].getNoteEnabled(x, y, 1)) {
                 gridState.gridColor[x][y].b = 127;
                 gridState.gridColor[x][y].g = 0;
@@ -1790,115 +1756,41 @@ void copyCurrentPatternGridEnabledToGridColor() {
 
 void copyDrumModeColorsToGridColor() {
     if (gridState.mode != gridMode::drums) return;
-    for (int i = 0; i < 8; i++) {
-        gridState.otherColor[i].r = 0;
-        gridState.otherColor[i].g = 0;
-        gridState.otherColor[i].b = 0;
-    }
-    gridState.otherColor[0].r = 10;
-    gridState.otherColor[0].g = 10;
-    gridState.otherColor[0].b = 10;
-    gridState.otherColor[1].r = 10;
-    gridState.otherColor[1].g = 10;
-    gridState.otherColor[1].b = 10;
-    gridState.otherColor[5].r = 127;
-    gridState.otherColor[5].g = 127;
-    gridState.otherColor[5].b = 127;
-    for (int x = 0; x < 4; x++) {
-        for (int y = 0; y < 4; y++){
-            gridState.gridColor[x][y].r = 127;
-            gridState.gridColor[x][y].g = 0;
-            gridState.gridColor[x][y].b = 0;
-        }
-    }
-    for (int x = 4; x < 8; x++) {
-        for (int y = 0; y < 4; y++) {
-            gridState.gridColor[x][y].r = 0;
-            gridState.gridColor[x][y].g = 127;
-            gridState.gridColor[x][y].b = 0;
-        }
-    }
-    for (int x = 0; x < 4; x++) {
-        for (int y = 4; y < 8; y++) {
-            gridState.gridColor[x][y].r = 0;
-            gridState.gridColor[x][y].g = 0;
-            gridState.gridColor[x][y].b = 127;
-        }
-    }
-    for (int x = 4; x < 8; x++) {
-        for (int y = 4; y < 8; y++) {
-            gridState.gridColor[x][y].r = 127;
-            gridState.gridColor[x][y].g = 0;
-            gridState.gridColor[x][y].b = 127;
-        }
-    }
+    for (int i = 0; i < 8; i++) gridState.otherColor[i] = { 0, 0, 0 };
+    gridState.otherColor[0] = { 10, 10, 10 };
+    gridState.otherColor[1] = { 10, 10, 10 };
+    gridState.otherColor[5] = { 127, 127, 127 };
+    for (int x = 0; x < 4; x++) for (int y = 0; y < 4; y++) gridState.gridColor[x][y] = { 127, 0, 0 };
+    for (int x = 4; x < 8; x++) for (int y = 0; y < 4; y++) gridState.gridColor[x][y] = { 0, 127, 0 };
+    for (int x = 0; x < 4; x++) for (int y = 4; y < 8; y++) gridState.gridColor[x][y] = { 0, 0, 127 };
+    for (int x = 4; x < 8; x++) for (int y = 4; y < 8; y++) gridState.gridColor[x][y] = { 127, 0, 127 };
 }
 
 void copyKeysModeColorsToGridColor() {
     if (gridState.mode != gridMode::keys) return;
-    for (int i = 0; i < 4; i++) {
-        gridState.otherColor[i].r = 10;
-        gridState.otherColor[i].g = 10;
-        gridState.otherColor[i].b = 10;
-    }
-    for (int i = 4; i < 8; i++) {
-        gridState.otherColor[i].r = 0;
-        gridState.otherColor[i].g = 0;
-        gridState.otherColor[i].b = 0;
-    }
-    gridState.otherColor[6].r = 127;
-    gridState.otherColor[6].g = 127;
-    gridState.otherColor[6].b = 127;
+    for (int i = 0; i < 4; i++) gridState.otherColor[i] = { 10, 10, 10 };
+    for (int i = 4; i < 8; i++) gridState.otherColor[i] = { 0, 0, 0 };
+    gridState.otherColor[6] = { 127,127,127 };
 
     if (keysMode.layout == keysMode.layoutType::piano) {
         for (int p = 0; p < 8; p += 2) {
-            for (int i = 1; i < 7; i++) {
-                gridState.gridColor[i][p].r = 127;
-                gridState.gridColor[i][p].g = 127;
-                gridState.gridColor[i][p].b = 127;
-            }
-            gridState.gridColor[0][p].r = 127;
-            gridState.gridColor[0][p].g = 0;
-            gridState.gridColor[0][p].b = 0;
-            gridState.gridColor[7][p].r = 127;
-            gridState.gridColor[7][p].g = 0;
-            gridState.gridColor[7][p].b = 0;
+            for (int i = 1; i < 7; i++) gridState.gridColor[i][p] = { 127, 127, 127 };
+            gridState.gridColor[0][p] = { 127, 0, 0 };
+            gridState.gridColor[7][p] = { 127, 0, 0 };
         }
         for (int i = 1; i < 8; i += 2) {
-            gridState.gridColor[0][i].r = 0;
-            gridState.gridColor[0][i].g = 0;
-            gridState.gridColor[0][i].b = 0;
-            gridState.gridColor[1][i].r = 0;
-            gridState.gridColor[1][i].g = 127;
-            gridState.gridColor[1][i].b = 127;
-            gridState.gridColor[2][i].r = 0;
-            gridState.gridColor[2][i].g = 127;
-            gridState.gridColor[2][i].b = 127;
-            gridState.gridColor[3][i].r = 0;
-            gridState.gridColor[3][i].g = 0;
-            gridState.gridColor[3][i].b = 0;
-            gridState.gridColor[4][i].r = 0;
-            gridState.gridColor[4][i].g = 127;
-            gridState.gridColor[4][i].b = 127;
-            gridState.gridColor[5][i].r = 0;
-            gridState.gridColor[5][i].g = 127;
-            gridState.gridColor[5][i].b = 127;
-            gridState.gridColor[6][i].r = 0;
-            gridState.gridColor[6][i].g = 127;
-            gridState.gridColor[6][i].b = 127;
-            gridState.gridColor[7][i].r = 0;
-            gridState.gridColor[7][i].g = 0;
-            gridState.gridColor[7][i].b = 0;
+            gridState.gridColor[0][i] = { 0, 0, 0 };
+            gridState.gridColor[1][i] = { 0, 127, 127 };
+            gridState.gridColor[2][i] = { 0, 127, 127 };
+            gridState.gridColor[3][i] = { 0, 0, 0 };
+            gridState.gridColor[4][i] = { 0, 127, 127 };
+            gridState.gridColor[5][i] = { 0, 127, 127 };
+            gridState.gridColor[6][i] = { 0, 127, 127 };
+            gridState.gridColor[7][i] = { 0, 0, 0 };
         }
     }
     else {
-        for (int x = 0; x < 8; x++) {
-            for (int y = 0; y < 8; y++) {
-                gridState.gridColor[x][y].r = keysMode.getNoteColor(x, y).r;
-                gridState.gridColor[x][y].g = keysMode.getNoteColor(x, y).g;
-                gridState.gridColor[x][y].b = keysMode.getNoteColor(x, y).b;
-            }
-        }
+        for (int x = 0; x < 8; x++) for (int y = 0; y < 8; y++) gridState.gridColor[x][y] = keysMode.getNoteColor(x, y);
     }
 }
 
@@ -2423,8 +2315,5 @@ bool loadSettings() {
 void sendMidiStartStop(bool start) {
     std::vector<unsigned char>message;
     message.push_back(start ? 0xFA : 0xFC);
-    for (int i = 0; i < numMidiOutDevs; i++) {
-        if(midiOutputDevicesClockEn[i])midiOut[i]->sendMessage(&message);
-    }
-    
+    for (int i = 0; i < numMidiOutDevs; i++) if(midiOutputDevicesClockEn[i]) midiOut[i]->sendMessage(&message);    
 }
