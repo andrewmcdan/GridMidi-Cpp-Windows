@@ -1,2 +1,0 @@
-D:\Google Drive\odrive\Google Drive\Projects\Megalodon Sound\GridMidi-Cpp-Windows\Debug\GridMidi-Cpp-Windows.exe
-G:\Google Drive Sync\odrive\Google Drive\Projects\Megalodon Sound\GridMidi-Cpp-Windows\Debug\GridMidi-Cpp-Windows.exe

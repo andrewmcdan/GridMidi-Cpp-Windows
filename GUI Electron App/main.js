@@ -5,7 +5,7 @@ const path = require('path')
 
 const { exec } = require('child_process')
 
-// exec('\"G:\\Google Drive Sync\\odrive\\Google Drive\\Projects\\Megalodon Sound\\GridMidi-Cpp-Windows\\Debug\\GridMidi-Cpp-Windows.exe\"', (error, stdout, stderr) => {
+// gridMidiProc = exec( "\"" + path.join(__dirname, 'GridMidi-Cpp-Windows.exe\"'), (error, stdout, stderr) => {
 //   if (error) {
 //     console.error(`error: ${error.message}`);
 //     return;
@@ -37,12 +37,6 @@ async function handleFileSave(){
     }
 }
 
-async function handleMyCustomFn(env,...args){
-    // console.log("in my custom Fn");
-    // console.log({args});
-    return "text from my custom Fn"
-}
-
 async function handleGetStatusOfController(){
     if(controller.IsPipeReady()){
         if(controller.PipeMessage("isReady_") == "ready"){
@@ -70,7 +64,9 @@ const createWindow = () => {
         height: 1080,
         webPreferences: {
             preload: path.join(__dirname, 'preload.js')
-        }
+        },
+        icon: path.join(__dirname, 'icon.png'),
+        //frame:false
     })
 
     mainWindow.setMenuBarVisibility(false)
@@ -86,7 +82,6 @@ const createWindow = () => {
 // initialization and is ready to create browser windows.
 // Some APIs can only be used after this event occurs.
 app.whenReady().then(() => {
-    ipcMain.handle('myCustomFn', handleMyCustomFn)
     ipcMain.handle('getStatusOfControllerFn', handleGetStatusOfController)
     ipcMain.handle('sendMessageToControllerFn', handleSendMessageToController)
     ipcMain.handle('dialog:openFile', handleFileOpen)
@@ -104,65 +99,9 @@ app.whenReady().then(() => {
 // for applications and their menu bar to stay active until the user quits
 // explicitly with Cmd + Q.
 app.on('window-all-closed', () => {
+    controller.PipeMessage('kill')
     if (process.platform !== 'darwin') app.quit()
 })
-
-// In this file you can include the rest of your app's specific main process
-// code. You can also put them in separate files and require them here.
-
-/*
-let response = 0;
-if (controller.IsPipeReady()) {
-    response = controller.PipeMessage("reqnumMidiDevs_____")
-} else {
-    console.log("Pipe Not Ready.");
-}
-// console.log("response");
-// console.log(response);
-
-
-if (controller.IsPipeReady()) {
-    response = controller.PipeMessage("reqmidiInDevNames__")
-} else {
-    console.log("Pipe Not Ready.");
-}
-// console.log("response");
-// console.log(response);
-
-if (controller.IsPipeReady()) {
-    response = controller.PipeMessage("reqmidiOutDevNames_")
-} else {
-    console.log("Pipe Not Ready.");
-}
-// console.log("response");
-// console.log(response);
-
-
-if (controller.IsPipeReady()) {
-    response = controller.PipeMessage("reqgetBPM__________")
-} else {
-    console.log("Pipe Not Ready.");
-}
-// console.log("response");
-// console.log(response);
-
-
-if (controller.IsPipeReady()) {
-    response = controller.PipeMessage("reqgetMOutDevClkEn_")
-} else {
-    console.log("Pipe Not Ready.");
-}
-// console.log("response");
-// console.log(response);
-
-if (controller.IsPipeReady()) {
-    response = controller.PipeMessage("reqgetMidiDevOutEn_")
-} else {
-    console.log("Pipe Not Ready.");
-}
-// console.log("response");
-// console.log(response);
-*/
 
 /**
  * Need to add logic to detect if the controller app is running so that it isn't started twice.

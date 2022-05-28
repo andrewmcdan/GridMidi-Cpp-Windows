@@ -425,6 +425,7 @@ setInterval(async () => {
 
 (getPatternOpts = async function(){
     let res = await window.gridMidiAPI.sendMessageToController('reqPatternOptions__')
+    if(res==undefined)return
     patternNum_boxEl.value = Number(res.substring(0, res.indexOf(":"))) + 1
     res = res.substring(res.indexOf(":") + 1)
     patternOutputChannelDropdownEl.value = Number(res.substring(0, res.indexOf(":"))) + 1
