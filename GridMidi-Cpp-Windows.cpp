@@ -898,7 +898,11 @@ int main(int argc, char* argv[])
         }
         //std::this_thread::sleep_for(std::chrono::microseconds(10));
     }
+    quitGridMidi();
+    return 0;
+}
 
+void quitGridMidi() {
     for (int i = 0; i < 128; i++) {
         delete midiIn[i];
     }
@@ -913,7 +917,6 @@ int main(int argc, char* argv[])
     else {
         std::cout << "Saving failed.\n";
     }
-    return 0;
 }
 
 DWORD WINAPI helperThreadFn(LPVOID lpvParam) {
@@ -1131,8 +1134,7 @@ VOID ProcessPipeMessage(LPTSTR pchRequest, LPTSTR pchReply, LPDWORD pchBytes)
         return;
     }
 
-    //if (stdString_Request.substr(0, 4) == "kill")std::cout << "kill received\n";
-    if (stdString_Request == "")exit(0);
+    if (stdString_Request.substr(0,12) == "killGridMidi")quitGridMidi();
 
     std::string command1 = stdString_Request.substr(0, 3); // first 3 characters are either req or dat for request or data
     std::string command2 = stdString_Request.substr(3, 16); // Next 8 characters are sub commands

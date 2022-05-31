@@ -418,7 +418,6 @@ setInterval(async () => {
     if (res) {
         // get values from controller and set all stuff on the page
         getDataFromController()
-        // console.log(gridMidi);
     }
 }, 1000);
 
@@ -472,4 +471,7 @@ function fromMidi(midi) {
 function toMidi(p) {
     if (!p[2] && p[2] !== 0) return null
     return SEMITONES[p[0]] + p[1] + 12 * (p[2] + 1)
+}
+function killGridMidiController(){
+    window.gridMidiAPI.sendMessageToController("killGridMidi");
 }

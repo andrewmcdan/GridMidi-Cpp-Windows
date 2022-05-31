@@ -5,6 +5,9 @@
 
 GUI/
 GUI Electron App/
+.vscode/
+.gitignore
+.gitattributes
 
 # User-specific files
 *.rsuser

@@ -56,3 +56,4 @@ bool loadProject(std::string);
 bool saveSettings();
 bool loadSettings();
 void sendMidiStartStop(bool);
+void quitGridMidi();

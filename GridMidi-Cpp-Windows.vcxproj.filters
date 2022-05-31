@@ -26,9 +26,6 @@
     <ClInclude Include="RtMidi.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="include\uberswitch\uberswitch.hpp">
-      <Filter>Header Files</Filter>
-    </ClInclude>
     <ClInclude Include="GridMidi.h">
       <Filter>Source Files</Filter>
     </ClInclude>

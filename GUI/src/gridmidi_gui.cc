@@ -35,7 +35,7 @@ Napi::Value PipeMessage( const Napi::CallbackInfo& info){
 
     if(!SetConsoleMode(hStdOut, mode)) return Napi::Number::New(env,-30 + GetLastError());
     if(!setConsoleWindowTitle(hStdOut, "Grid MIDI - Electron GUI")) return Napi::Number::New(env,-60 + GetLastError());
-    if(!setConsoleTextColor(hStdOut,255,200,200)) return Napi::Number::New(env,-40 + GetLastError());
+    if(!setConsoleTextColor(hStdOut,100,100,255)) return Napi::Number::New(env,-40 + GetLastError());
     if(!deleteConsoleLines(hStdOut,6)) return Napi::Number::New(env,-50 + GetLastError());
     // std::cout << "********** Entering cpp module code. fn(PipeMessage) *************" << std::endl;
     

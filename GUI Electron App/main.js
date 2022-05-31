@@ -5,19 +5,19 @@ const path = require('path')
 
 const { exec } = require('child_process')
 
-// gridMidiProc = exec( "\"" + path.join(__dirname, 'GridMidi-Cpp-Windows.exe\"'), (error, stdout, stderr) => {
-//   if (error) {
-//     console.error(`error: ${error.message}`);
-//     return;
-//   }
+gridMidiProc = exec( "\"" + path.join(__dirname, 'GridMidi-Cpp-Windows.exe\"'), (error, stdout, stderr) => {
+  if (error) {
+    console.error(`error: ${error.message}`);
+    return;
+  }
 
-//   if (stderr) {
-//     console.error(`stderr: ${stderr}`);
-//     return;
-//   }
+  if (stderr) {
+    console.error(`stderr: ${stderr}`);
+    return;
+  }
 
-//   console.log(`stdout:\n${stdout}`);
-// });
+  console.log(`stdout:\n${stdout}`);
+});
 
 async function handleFileOpen(){
     const {canceled, filePaths} = await dialog.showOpenDialog()
@@ -76,6 +76,17 @@ const createWindow = () => {
     // Open the DevTools.
     mainWindow.webContents.openDevTools()
     // mainWindow.maximize();
+
+    // catch the close event and show a confirmation dialog
+    mainWindow.on('close',(event)=>{
+        var choice = dialog.showMessageBoxSync({
+            type: 'question',
+            buttons: ['Yes, exit now', 'No, go back'],
+            title: 'Exit confirmation',
+            message: 'Are you sure you want to exit? Perhaps you should save.'
+        });
+        if(choice == 1)event.preventDefault()
+    })
 }
 
 // This method will be called when Electron has finished
@@ -99,7 +110,7 @@ app.whenReady().then(() => {
 // for applications and their menu bar to stay active until the user quits
 // explicitly with Cmd + Q.
 app.on('window-all-closed', () => {
-    controller.PipeMessage('kill')
+    controller.PipeMessage('killGridMidi')
     if (process.platform !== 'darwin') app.quit()
 })
 
